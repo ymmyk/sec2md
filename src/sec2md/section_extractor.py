@@ -197,6 +197,12 @@ class SectionExtractor:
         if self._toc_locked or page_num > 5:
             return False
 
+        # Large pages (>20K chars) are not TOCs - they're full document content
+        # A typical TOC page is 2-10K chars
+        if len(content) > 20000:
+            self._log(f"DEBUG: Page {page_num} is {len(content)} chars - too large for TOC")
+            return False
+
         # Check for traditional TOC patterns (dot leaders, plain ITEM rows)
         item_hits = len(ITEM_ROWS_RE.findall(content))
         leader_hits = len(DOT_LEAD_RE.findall(content))
