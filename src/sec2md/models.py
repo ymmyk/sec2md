@@ -409,8 +409,34 @@ class Section(BaseModel):
         return "\n\n---\n\n".join(p.content for p in self.pages)
 
     def markdown(self) -> str:
-        """Get section content as single markdown string."""
-        return "\n\n".join(p.content for p in self.pages)
+        """Get section content as single markdown string with section header."""
+        # Generate markdown heading based on item structure
+        heading_parts = []
+        if self.part:
+            heading_parts.append(self.part)
+        if self.item:
+            heading_parts.append(self.item)
+        if self.item_title:
+            heading_parts.append(self.item_title)
+
+        if not heading_parts:
+            # No header info, just return content
+            return "\n\n".join(p.content for p in self.pages)
+
+        # Determine heading level based on item type
+        # Use h2 (##) for main items (e.g., ITEM 1, ITEM 7)
+        # Use h3 (###) for sub-items (e.g., ITEM 1A, ITEM 7A)
+        if self.item and any(c.isalpha() for c in self.item.replace("ITEM", "").strip()):
+            # Has letter suffix like "1A" or "7A" - use h3
+            heading_level = "###"
+        else:
+            # Main item number - use h2
+            heading_level = "##"
+
+        header_text = " ".join(heading_parts)
+        content = "\n\n".join(p.content for p in self.pages)
+
+        return f"{heading_level} {header_text}\n\n{content}"
 
     def preview(self) -> None:
         """

@@ -133,6 +133,13 @@ class Parser:
         return "font-style:italic" in style or el.name in ITALIC_TAGS
 
     @staticmethod
+    def _is_heading(el: Tag) -> bool:
+        """Check if element is a heading tag."""
+        if not isinstance(el, Tag):
+            return False
+        return el.name in {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+    @staticmethod
     def _is_block(el: Tag) -> bool:
         return isinstance(el, Tag) and el.name in BLOCK_TAGS
 
@@ -219,6 +226,9 @@ class Parser:
     @staticmethod
     def _wrap_markdown(el: Tag) -> str:
         """Return the prefix/suffix markdown wrapper for this element."""
+        # Headings return empty string here - handled separately
+        if Parser._is_heading(el):
+            return ""
         bold = Parser._is_bold(el)
         italic = Parser._is_italic(el)
         if bold and italic:
@@ -723,6 +733,25 @@ class Parser:
             t = self._process_element(root)
             if t:
                 self._append(page_num, t, source_node=root)
+            self._blankline_after(page_num)
+            if self._has_break_after(root):
+                page_num += 1
+
+            # Restore TextBlock context before early return
+            if text_block_started and not text_block_has_continuation:
+                if continuation_ends_text_block:
+                    self.current_text_block = None
+                else:
+                    self.current_text_block = previous_text_block
+
+            return page_num
+
+        # Handle headings as h2 markdown
+        if self._is_heading(root):
+            t = self._process_element(root)
+            if t:
+                # Always use h2 (##) for all heading levels
+                self._append(page_num, f"## {t}", source_node=root)
             self._blankline_after(page_num)
             if self._has_break_after(root):
                 page_num += 1
