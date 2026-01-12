@@ -48,18 +48,33 @@ Homepage = "https://github.com/lucasastorian/sec2md"
 Repository = "https://github.com/lucasastorian/sec2md"
 Issues = "https://github.com/lucasastorian/sec2md/issues"
 
-
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.black]
 line-length = 100
 target-version = ["py39"]
+extend-exclude = '''
+\.ipynb$
+'''
 
 [tool.ruff]
 line-length = 100
 target-version = "py39"
+extend-exclude = ["*.ipynb"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+
+[tool.uv]
+
+[dependency-groups]
+dev = [
+    "black>=25.11.0",
+    "ruff>=0.14.11",
+]
+# Documentation: Run linting with `uv run ruff check .`
+# Fix linting issues with `uv run ruff check --fix .`
+# Format code with `uv run black .`
+# Or combine: `uv run ruff check --fix . && uv run black .`

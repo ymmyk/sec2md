@@ -8,12 +8,14 @@ from pydantic import BaseModel, Field, field_validator, computed_field
 
 try:
     import tiktoken
+
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
 
 try:
     from IPython.display import display, Markdown as IPythonMarkdown
+
     IPYTHON_AVAILABLE = True
 except ImportError:
     IPYTHON_AVAILABLE = False
@@ -151,7 +153,6 @@ ITEM_10K_MAPPING: dict[Item10K, Tuple[str, str]] = {
     Item10K.PROPERTIES: ("PART I", "ITEM 2"),
     Item10K.LEGAL_PROCEEDINGS: ("PART I", "ITEM 3"),
     Item10K.MINE_SAFETY: ("PART I", "ITEM 4"),
-
     # Part II
     Item10K.MARKET_FOR_STOCK: ("PART II", "ITEM 5"),
     Item10K.SELECTED_FINANCIAL_DATA: ("PART II", "ITEM 6"),
@@ -162,14 +163,12 @@ ITEM_10K_MAPPING: dict[Item10K, Tuple[str, str]] = {
     Item10K.CONTROLS_AND_PROCEDURES: ("PART II", "ITEM 9A"),
     Item10K.OTHER_INFORMATION: ("PART II", "ITEM 9B"),
     Item10K.CYBERSECURITY_DISCLOSURES: ("PART II", "ITEM 9C"),
-
     # Part III
     Item10K.DIRECTORS_AND_OFFICERS: ("PART III", "ITEM 10"),
     Item10K.EXECUTIVE_COMPENSATION: ("PART III", "ITEM 11"),
     Item10K.SECURITY_OWNERSHIP: ("PART III", "ITEM 12"),
     Item10K.CERTAIN_RELATIONSHIPS: ("PART III", "ITEM 13"),
     Item10K.PRINCIPAL_ACCOUNTANT: ("PART III", "ITEM 14"),
-
     # Part IV
     Item10K.EXHIBITS: ("PART IV", "ITEM 15"),
     Item10K.FORM_10K_SUMMARY: ("PART IV", "ITEM 16"),
@@ -182,7 +181,6 @@ ITEM_10Q_MAPPING: dict[Item10Q, Tuple[str, str]] = {
     Item10Q.MD_AND_A_P1: ("PART I", "ITEM 2"),
     Item10Q.MARKET_RISK_P1: ("PART I", "ITEM 3"),
     Item10Q.CONTROLS_AND_PROCEDURES_P1: ("PART I", "ITEM 4"),
-
     # Part II
     Item10Q.LEGAL_PROCEEDINGS_P2: ("PART II", "ITEM 1"),
     Item10Q.RISK_FACTORS_P2: ("PART II", "ITEM 1A"),
@@ -234,6 +232,7 @@ ITEM_8K_TITLES: dict[str, str] = {
 
 class Exhibit(BaseModel):
     """8-K exhibit entry."""
+
     exhibit_no: str = Field(..., description="Exhibit number (e.g., '99.1', '104')")
     description: str = Field(..., description="Exhibit description")
 
@@ -245,7 +244,9 @@ class TextBlock(BaseModel):
 
     name: str = Field(..., description="XBRL tag name (e.g., 'us-gaap:DebtDisclosureTextBlock')")
     title: Optional[str] = Field(None, description="Human-readable title (e.g., 'Note 9 – Debt')")
-    elements: List['Element'] = Field(default_factory=list, description="Element objects in this TextBlock")
+    elements: List["Element"] = Field(
+        default_factory=list, description="Element objects in this TextBlock"
+    )
 
     # Optional: Set by merge_text_blocks() for multi-page notes
     start_page: Optional[int] = Field(None, description="First page this TextBlock appears on")
@@ -273,8 +274,12 @@ class Element(BaseModel):
     kind: str = Field(..., description="Element type (e.g., 'paragraph', 'table', 'heading')")
     page_start: int = Field(..., description="First page this element appears on")
     page_end: int = Field(..., description="Last page this element appears on")
-    content_start_offset: Optional[int] = Field(None, description="Character offset where element starts in page content")
-    content_end_offset: Optional[int] = Field(None, description="Character offset where element ends in page content")
+    content_start_offset: Optional[int] = Field(
+        None, description="Character offset where element starts in page content"
+    )
+    content_end_offset: Optional[int] = Field(
+        None, description="Character offset where element ends in page content"
+    )
 
     model_config = {"frozen": False}
 
@@ -291,8 +296,12 @@ class Element(BaseModel):
         return _count_tokens(self.content)
 
     def __repr__(self) -> str:
-        preview = self.content[:80].replace('\n', ' ')
-        pages = f"p{self.page_start}" if self.page_start == self.page_end else f"p{self.page_start}-{self.page_end}"
+        preview = self.content[:80].replace("\n", " ")
+        pages = (
+            f"p{self.page_start}"
+            if self.page_start == self.page_end
+            else f"p{self.page_start}-{self.page_end}"
+        )
         return f"Element(id='{self.id}', kind='{self.kind}', {pages}, chars={len(self.content)}, preview='{preview}...')"
 
 
@@ -303,8 +312,12 @@ class Page(BaseModel):
     content: str = Field(..., description="Markdown content of the page")
     elements: Optional[List[Element]] = Field(None, description="Citable elements on this page")
     text_blocks: Optional[List[TextBlock]] = Field(None, description="XBRL TextBlocks on this page")
-    display_page: Optional[int] = Field(None, description="Original page number as shown in the filing (e.g., bottom of page)")
-    toc_metadata: Optional[dict] = Field(None, description="Table of contents anchor metadata for TOC-based section extraction")
+    display_page: Optional[int] = Field(
+        None, description="Original page number as shown in the filing (e.g., bottom of page)"
+    )
+    toc_metadata: Optional[dict] = Field(
+        None, description="Table of contents anchor metadata for TOC-based section extraction"
+    )
 
     model_config = {"frozen": False, "arbitrary_types_allowed": True}
 
@@ -346,11 +359,11 @@ class Page(BaseModel):
             Dict with all nested models properly serialized.
         """
         if include_only_essentials:
-            return self.model_dump(include={'number', 'content', 'elements'})
+            return self.model_dump(include={"number", "content", "elements"})
         return self.model_dump()
 
     def __repr__(self) -> str:
-        preview = self.content[:100].replace('\n', ' ')
+        preview = self.content[:100].replace("\n", " ")
         elem_info = f", elements={len(self.elements)}" if self.elements else ""
         tb_info = f", text_blocks={len(self.text_blocks)}" if self.text_blocks else ""
         display_info = f", display_page={self.display_page}" if self.display_page else ""
@@ -368,7 +381,7 @@ class Section(BaseModel):
 
     model_config = {"frozen": False, "arbitrary_types_allowed": True}
 
-    @field_validator('pages')
+    @field_validator("pages")
     @classmethod
     def validate_pages_not_empty(cls, v: List[Page]) -> List[Page]:
         """Ensure section has at least one page."""
@@ -411,7 +424,9 @@ class Section(BaseModel):
             display(IPythonMarkdown(content))
         else:
             header = f"{self.item}: {self.item_title}"
-            print(f"=== {header} ({self.tokens} tokens, pages {self.page_range[0]}-{self.page_range[1]}) ===")
+            print(
+                f"=== {header} ({self.tokens} tokens, pages {self.page_range[0]}-{self.page_range[1]}) ==="
+            )
             print(content)
 
     def __str__(self) -> str:

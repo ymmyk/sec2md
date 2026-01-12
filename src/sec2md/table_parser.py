@@ -12,7 +12,8 @@ BULLETS = {"•", "●", "◦", "–", "-", "—", "·", ""}
 
 # Robust numeric pattern for SEC filings
 # Matches: $1,234.56, (1,234), -1234, 12.5%, etc.
-NUMERIC_RE = re.compile(r"""
+NUMERIC_RE = re.compile(
+    r"""
     ^\s*
     [\(\[]?                      # optional opening paren/bracket
     [\-—–]?\s*                   # optional dash
@@ -21,12 +22,15 @@ NUMERIC_RE = re.compile(r"""
     (?:[.,]\d+)?                # decimals
     \s*%?                       # optional percent
     [\)\]]?\s*$                 # optional closing paren/bracket
-""", re.X)
+""",
+    re.X,
+)
 
 
 @dataclass
 class Cell:
     """A single cell in a table, potentially containing XBRL data"""
+
     text: str
     rowspan: int = 1
     colspan: int = 1
@@ -66,7 +70,7 @@ class TableParser:
         Args:
             table_element: The specific table BS4 tag
         """
-        if not isinstance(table_element, Tag) or table_element.name != 'table':
+        if not isinstance(table_element, Tag) or table_element.name != "table":
             raise ValueError("table_element must be a table tag")
 
         self.table_element = table_element
@@ -76,15 +80,15 @@ class TableParser:
 
     def _extract_cells(self) -> List[List[Cell]]:
         rows = []
-        for tr in self.table_element.find_all('tr'):
+        for tr in self.table_element.find_all("tr"):
             row = []
-            for td in tr.find_all(['td', 'th']):
-                text = td.get_text(separator=" ", strip=True).replace('\xa0', ' ')
+            for td in tr.find_all(["td", "th"]):
+                text = td.get_text(separator=" ", strip=True).replace("\xa0", " ")
                 if not text:
-                    if td.find('img'):
-                        text = '●'  # or '•' depending on your BULLETS set
-                rowspan = self._safe_parse_int(td.get('rowspan'))
-                colspan = self._safe_parse_int(td.get('colspan'))
+                    if td.find("img"):
+                        text = "●"  # or '•' depending on your BULLETS set
+                rowspan = self._safe_parse_int(td.get("rowspan"))
+                colspan = self._safe_parse_int(td.get("colspan"))
                 row.append(Cell(text=text, rowspan=rowspan, colspan=colspan))
             if row:
                 rows.append(row)
@@ -96,7 +100,7 @@ class TableParser:
         try:
             if not value or not isinstance(value, str):
                 return default
-            cleaned = ''.join(c for c in value if c.isdigit())
+            cleaned = "".join(c for c in value if c.isdigit())
             return int(cleaned) if cleaned else default
         except (ValueError, TypeError):
             return default
@@ -152,10 +156,10 @@ class TableParser:
         if self.is_footnote(s2):
             return True
 
-        if s1 == '$':
+        if s1 == "$":
             return True
 
-        if s2 == '%':
+        if s2 == "%":
             return True
 
         return False
@@ -163,7 +167,7 @@ class TableParser:
     @staticmethod
     def is_footnote(text: str) -> bool:
         """Check if string is a number or letter within square brackets and nothing else, e.g., [1], [b]"""
-        pattern = r'^\[[a-zA-Z0-9]+\]$'
+        pattern = r"^\[[a-zA-Z0-9]+\]$"
         return bool(re.match(pattern, text))
 
     @staticmethod
@@ -173,26 +177,18 @@ class TableParser:
             return grid
 
         rows_to_keep = [
-            i for i, row in enumerate(grid)
-            if any(
-                cell is not None and cell.text.strip()
-                for cell in row
-            )
+            i
+            for i, row in enumerate(grid)
+            if any(cell is not None and cell.text.strip() for cell in row)
         ]
 
         columns_to_keep = [
-            j for j in range(len(grid[0]))
-            if any(
-                grid[i][j] is not None and
-                (grid[i][j].text.strip())
-                for i in range(len(grid))
-            )
+            j
+            for j in range(len(grid[0]))
+            if any(grid[i][j] is not None and (grid[i][j].text.strip()) for i in range(len(grid)))
         ]
 
-        filtered_grid = [
-            [grid[i][j] for j in columns_to_keep]
-            for i in rows_to_keep
-        ]
+        filtered_grid = [[grid[i][j] for j in columns_to_keep] for i in rows_to_keep]
 
         return filtered_grid
 
@@ -289,7 +285,9 @@ class TableParser:
             # Use row0 as header, rest as data
             return row0, matrix[1:]
 
-    def _clean_empty_rows_and_cols(self, headers: List[str], data: List[List[str]]) -> tuple[List[str], List[List[str]]]:
+    def _clean_empty_rows_and_cols(
+        self, headers: List[str], data: List[List[str]]
+    ) -> tuple[List[str], List[List[str]]]:
         """Remove completely empty rows and columns"""
         if not data:
             return headers, data
@@ -376,7 +374,7 @@ class TableParser:
             while len(row) < len(headers):
                 row.append("")
             # Escape pipe characters
-            escaped_row = [str(cell).replace("|", "\\|") for cell in row[:len(headers)]]
+            escaped_row = [str(cell).replace("|", "\\|") for cell in row[: len(headers)]]
             lines.append("| " + " | ".join(escaped_row) + " |")
 
         return "\n".join(lines)

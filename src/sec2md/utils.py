@@ -18,7 +18,7 @@ def is_url(source: str) -> bool:
     """
     try:
         result = urlparse(source)
-        return all([result.scheme, result.netloc]) and result.scheme in ('http', 'https')
+        return all([result.scheme, result.netloc]) and result.scheme in ("http", "https")
     except Exception:
         return False
 
@@ -45,8 +45,7 @@ def fetch(url: str, user_agent: str | None = None) -> str:
     """
     if is_edgar_url(url) and not user_agent:
         raise ValueError(
-            "SEC EDGAR requires a User-Agent header. "
-            "Pass user_agent='YourName your@email.com'"
+            "SEC EDGAR requires a User-Agent header. " "Pass user_agent='YourName your@email.com'"
         )
 
     headers = {}
@@ -86,7 +85,7 @@ def flatten_note(content: str) -> Optional[str]:
         >>> flattened_html = sec2md.flatten_note(note.content)
         >>> md = sec2md.convert_to_markdown(flattened_html)
     """
-    soup = BeautifulSoup(content, 'lxml')
+    soup = BeautifulSoup(content, "lxml")
     elements = []
 
     body = soup.find("body")
@@ -97,8 +96,8 @@ def flatten_note(content: str) -> Optional[str]:
     if table is None:
         return None
 
-    for row in table.find_all('tr', recursive=False):
-        cells = row.find_all(['th', 'td'], recursive=False)
+    for row in table.find_all("tr", recursive=False):
+        cells = row.find_all(["th", "td"], recursive=False)
 
         for cell in cells:
             elements.append(cell)
@@ -106,4 +105,4 @@ def flatten_note(content: str) -> Optional[str]:
     if len(elements) == 0:
         return None
 
-    return ''.join([str(element) for element in elements])
+    return "".join([str(element) for element in elements])

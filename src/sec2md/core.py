@@ -1,6 +1,6 @@
 """Core conversion functionality."""
 
-from typing import overload, List, Literal
+from typing import overload, List
 from sec2md.utils import is_url, fetch
 from sec2md.parser import Parser
 from sec2md.models import Page
@@ -64,15 +64,15 @@ def convert_to_markdown(
     # Handle bytes input
     if isinstance(source, bytes):
         # Check if it's PDF
-        if source.startswith(b'%PDF'):
+        if source.startswith(b"%PDF"):
             raise ValueError(
                 "PDF content detected. This library only supports HTML input. "
                 "Please extract HTML from the filing first."
             )
-        source = source.decode('utf-8', errors='ignore')
+        source = source.decode("utf-8", errors="ignore")
 
     # Check for PDF in string
-    if isinstance(source, str) and source.strip().startswith('%PDF'):
+    if isinstance(source, str) and source.strip().startswith("%PDF"):
         raise ValueError(
             "PDF content detected. This library only supports HTML input. "
             "Please extract HTML from the filing first."
@@ -137,15 +137,15 @@ def parse_filing(
     # Handle bytes input
     if isinstance(source, bytes):
         # Check if it's PDF
-        if source.startswith(b'%PDF'):
+        if source.startswith(b"%PDF"):
             raise ValueError(
                 "PDF content detected. This library only supports HTML input. "
                 "Please extract HTML from the filing first."
             )
-        source = source.decode('utf-8', errors='ignore')
+        source = source.decode("utf-8", errors="ignore")
 
     # Check for PDF in string
-    if isinstance(source, str) and source.strip().startswith('%PDF'):
+    if isinstance(source, str) and source.strip().startswith("%PDF"):
         raise ValueError(
             "PDF content detected. This library only supports HTML input. "
             "Please extract HTML from the filing first."

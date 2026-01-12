@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field, computed_field
 
 try:
     import tiktoken
+
     TIKTOKEN_AVAILABLE = True
 except ImportError:
     TIKTOKEN_AVAILABLE = False
@@ -28,16 +29,19 @@ def split_sentences(text: str) -> List[str]:
     """Simple regex-based sentence splitter"""
     # Split on .!? followed by whitespace and capital letter or end of string
     # Handles common abbreviations like Mr., Dr., Inc., etc.
-    sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
+    sentences = re.split(r"(?<=[.!?])\s+(?=[A-Z])", text)
     return [s.strip() for s in sentences if s.strip()]
 
 
 class BaseBlock(BaseModel):
     """Base class for markdown blocks."""
+
     block_type: str = Field(..., description="Type of markdown block")
     content: str = Field(..., description="Block content")
     page: int = Field(..., description="Page number")
-    element_ids: Optional[List[str]] = Field(default=None, description="Element IDs backing this block")
+    element_ids: Optional[List[str]] = Field(
+        default=None, description="Element IDs backing this block"
+    )
 
     model_config = {"frozen": False}
 
@@ -49,6 +53,7 @@ class BaseBlock(BaseModel):
 
 class Sentence(BaseModel):
     """Sentence within a text block."""
+
     content: str = Field(..., description="Sentence content")
 
     model_config = {"frozen": False}
@@ -60,7 +65,7 @@ class Sentence(BaseModel):
 
 
 class TextBlock(BaseBlock):
-    block_type: str = Field(default='Text', description="Text block type")
+    block_type: str = Field(default="Text", description="Text block type")
 
     @computed_field
     @property
@@ -69,42 +74,44 @@ class TextBlock(BaseBlock):
         return [Sentence(content=content) for content in split_sentences(self.content)]
 
     @classmethod
-    def from_sentences(cls, sentences: List[Sentence], page: int, element_ids: Optional[List[str]] = None):
+    def from_sentences(
+        cls, sentences: List[Sentence], page: int, element_ids: Optional[List[str]] = None
+    ):
         content = " ".join([sentence.content for sentence in sentences])
-        return cls(content=content, page=page, block_type='Text', element_ids=element_ids)
+        return cls(content=content, page=page, block_type="Text", element_ids=element_ids)
 
 
 class TableBlock(BaseBlock):
-    block_type: str = Field(default='Table', description="Table block type")
+    block_type: str = Field(default="Table", description="Table block type")
 
     def __init__(self, **data):
-        if 'content' in data:
-            data['content'] = self._to_minified_markdown_static(data['content'])
+        if "content" in data:
+            data["content"] = self._to_minified_markdown_static(data["content"])
         super().__init__(**data)
 
     @staticmethod
     def _to_minified_markdown_static(content: str) -> str:
         """Returns the table in a Minified Markdown format"""
-        lines = content.split('\n')
+        lines = content.split("\n")
         cleaned_lines = []
 
         for i, line in enumerate(lines):
             if not line.strip():
                 continue
 
-            parts = line.split('|')
-            cleaned_parts = [re.sub(r'\s+', ' ', part.strip()) for part in parts]
-            cleaned_line = '|'.join(cleaned_parts)
+            parts = line.split("|")
+            cleaned_parts = [re.sub(r"\s+", " ", part.strip()) for part in parts]
+            cleaned_line = "|".join(cleaned_parts)
 
             if i == 1:
                 num_cols = len(cleaned_parts) - 1
-                separator = '|' + '|'.join(['---'] * num_cols) + '|'
+                separator = "|" + "|".join(["---"] * num_cols) + "|"
                 cleaned_lines.append(separator)
             else:
                 cleaned_lines.append(cleaned_line)
 
-        return '\n'.join(cleaned_lines)
+        return "\n".join(cleaned_lines)
 
 
 class HeaderBlock(BaseBlock):
-    block_type: str = Field(default='Header', description="Header block type")
+    block_type: str = Field(default="Header", description="Header block type")

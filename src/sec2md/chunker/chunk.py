@@ -6,7 +6,7 @@ from sec2md.chunker.blocks import BaseBlock
 if TYPE_CHECKING:
     from sec2md.models import Element
 else:
-    Element = 'Element'  # Forward reference for Pydantic
+    Element = "Element"  # Forward reference for Pydantic
 
 
 class Chunk(BaseModel):
@@ -14,9 +14,13 @@ class Chunk(BaseModel):
 
     blocks: List[BaseBlock] = Field(..., description="List of markdown blocks in this chunk")
     header: Optional[str] = Field(None, description="Optional header for embedding context")
-    elements: List['Element'] = Field(default_factory=list, description="Element objects for citation")
+    elements: List["Element"] = Field(
+        default_factory=list, description="Element objects for citation"
+    )
     vector: Optional[List[float]] = Field(None, description="Vector embedding for this chunk")
-    display_page_map: Optional[Dict[int, int]] = Field(None, description="Maps page number to original display_page from filing")
+    display_page_map: Optional[Dict[int, int]] = Field(
+        None, description="Maps page number to original display_page from filing"
+    )
     index: Optional[int] = Field(None, description="Sequential index of this chunk (0-based)")
 
     model_config = {"frozen": False, "arbitrary_types_allowed": True}
@@ -107,10 +111,7 @@ class Chunk(BaseModel):
             if not page_content.strip():
                 continue
 
-            page_content_data.append({
-                "page": page,
-                "content": page_content
-            })
+            page_content_data.append({"page": page, "content": page_content})
 
         return sorted(page_content_data, key=lambda x: x["page"])
 
@@ -132,7 +133,7 @@ class Chunk(BaseModel):
     @property
     def has_table(self) -> bool:
         """Returns True if this chunk contains one or more table blocks"""
-        return any(block.block_type == 'Table' for block in self.blocks)
+        return any(block.block_type == "Table" for block in self.blocks)
 
     @computed_field
     @property
@@ -158,7 +159,11 @@ class Chunk(BaseModel):
 
     def __repr__(self):
         index_str = f"[{self.index}] " if self.index is not None else ""
-        pages_str = f"{self.start_page}-{self.end_page}" if self.start_page != self.end_page else str(self.start_page)
+        pages_str = (
+            f"{self.start_page}-{self.end_page}"
+            if self.start_page != self.end_page
+            else str(self.start_page)
+        )
         display_str = ""
         if self.start_display_page is not None:
             if self.start_display_page != self.end_display_page:

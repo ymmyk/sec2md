@@ -1,15 +1,20 @@
 """Section extraction utilities for SEC filings."""
 
 from typing import List, Optional, Union
-from sec2md.models import Page, Section, FilingType, Item10K, Item10Q, ITEM_10K_MAPPING, ITEM_10Q_MAPPING
+from sec2md.models import (
+    Page,
+    Section,
+    FilingType,
+    Item10K,
+    Item10Q,
+    ITEM_10K_MAPPING,
+    ITEM_10Q_MAPPING,
+)
 from sec2md.section_extractor import SectionExtractor
 
 
 def extract_sections(
-    pages: List[Page],
-    filing_type: FilingType,
-    debug: bool = False,
-    raw_html: Optional[str] = None
+    pages: List[Page], filing_type: FilingType, debug: bool = False, raw_html: Optional[str] = None
 ) -> List[Section]:
     """
     Extract sections from filing pages.
@@ -31,10 +36,7 @@ def extract_sections(
         ...     print(f"{section.item}: {section.item_title}")
     """
     extractor = SectionExtractor(
-        pages=pages,
-        filing_type=filing_type,
-        debug=debug,
-        raw_html=raw_html
+        pages=pages, filing_type=filing_type, debug=debug, raw_html=raw_html
     )
 
     # SectionExtractor now returns Section objects directly
@@ -42,9 +44,7 @@ def extract_sections(
 
 
 def get_section(
-    sections: List[Section],
-    item: Union[Item10K, Item10Q, str],
-    filing_type: FilingType = "10-K"
+    sections: List[Section], item: Union[Item10K, Item10Q, str], filing_type: FilingType = "10-K"
 ) -> Optional[Section]:
     """
     Get a specific section by item enum or string.

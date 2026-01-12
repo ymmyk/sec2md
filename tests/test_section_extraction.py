@@ -31,16 +31,15 @@ class TestStandardFormatExtraction:
         pages = parser.get_pages(include_elements=False)
 
         extractor = SectionExtractor(
-            pages=pages,
-            filing_type="10-K",
-            debug=True,
-            raw_html=parser.raw_html
+            pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html
         )
 
         sections = extractor.get_sections()
 
         # Microsoft should extract sections successfully
-        assert len(sections) > 0, "Microsoft filing should extract >0 sections with pattern matching"
+        assert (
+            len(sections) > 0
+        ), "Microsoft filing should extract >0 sections with pattern matching"
 
         # Should find key sections
         section_items = {s.item for s in sections}
@@ -65,10 +64,7 @@ class TestNonStandardFormatExtraction:
         pages = parser.get_pages(include_elements=False)
 
         extractor = SectionExtractor(
-            pages=pages,
-            filing_type="10-K",
-            debug=True,
-            raw_html=parser.raw_html
+            pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html
         )
 
         sections = extractor.get_sections()
@@ -96,10 +92,7 @@ class TestNonStandardFormatExtraction:
 
         # Create extractor WITHOUT raw_html to force pattern-only mode
         extractor = SectionExtractor(
-            pages=pages,
-            filing_type="10-K",
-            debug=True,
-            raw_html=None  # No fallback available
+            pages=pages, filing_type="10-K", debug=True, raw_html=None  # No fallback available
         )
 
         sections = extractor.get_sections()
@@ -116,13 +109,10 @@ class TestTOCExtractionComponents:
         parser = Parser(intel_html)
         pages = parser.get_pages(include_elements=False)
 
-        extractor = SectionExtractor(
-            pages=pages,
-            filing_type="10-K",
-            raw_html=parser.raw_html
-        )
+        extractor = SectionExtractor(pages=pages, filing_type="10-K", raw_html=parser.raw_html)
 
         from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(parser.raw_html, "lxml")
         anchors = extractor._parse_all_anchor_targets(soup)
 
@@ -135,7 +125,6 @@ class TestTOCExtractionComponents:
 
     def test_match_section_to_item(self):
         """Test section text matching to ITEM identifiers."""
-        parser = Parser("<html></html>")
         extractor = SectionExtractor(pages=[], filing_type="10-K")
 
         # Test various formats
@@ -157,7 +146,7 @@ class TestStylingBasedExtraction:
     @pytest.fixture
     def styled_headers_html(self):
         """HTML with styled headers but no PART/ITEM text."""
-        return '''
+        return """
         <html><body>
         <div style="font-weight:bold;font-size:14pt;color:#003366">Risk Factors</div>
         <p style="font-size:11pt">This is body text about risks. Our business faces various risks including market volatility, competitive pressures, regulatory changes, and operational challenges. These risk factors should be carefully considered by investors when evaluating our company. Economic conditions may impact our revenue and profitability. We operate in a highly competitive industry with rapidly evolving technology. Our success depends on our ability to innovate and adapt to changing market conditions. Failure to manage these risks effectively could materially harm our business, financial condition, and results of operations.</p>
@@ -165,7 +154,7 @@ class TestStylingBasedExtraction:
         <div style="font-weight:700;font-size:14pt;color:rgb(0,51,102)">Management's Discussion and Analysis</div>
         <p style="font-size:11pt">MD&A content here discussing our financial results, key performance indicators, and strategic initiatives. This section provides management's perspective on our operating results, liquidity, and capital resources. We analyze trends and uncertainties that have had or are expected to have a material impact on our business. Our revenue grew year-over-year driven by strong demand across all product lines. Operating expenses increased primarily due to investments in research and development. We maintain a strong balance sheet with sufficient liquidity to fund our operations and strategic growth initiatives.</p>
         </body></html>
-        '''
+        """
 
     def test_styled_header_extraction(self, styled_headers_html):
         """Verify extraction from styled headers without PART/ITEM patterns."""
@@ -173,10 +162,7 @@ class TestStylingBasedExtraction:
         pages = parser.get_pages(include_elements=False)
 
         extractor = SectionExtractor(
-            pages=pages,
-            filing_type="10-K",
-            debug=True,
-            raw_html=parser.raw_html
+            pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html
         )
 
         sections = extractor.get_sections()
@@ -190,17 +176,18 @@ class TestStylingBasedExtraction:
     def test_styling_confidence_scoring(self):
         """Verify confidence scoring filters false positives."""
         # HTML with both real section header and coincidental bold text
-        html = '''
+        html = """
         <html><body style="font-size:11pt;color:#000000">
         <span style="font-weight:bold;font-size:14pt;color:#003366">Risk Factors</span>
         <p>This paragraph has <b>bold emphasis</b> but should not be a section.</p>
         </body></html>
-        '''
+        """
 
         parser = Parser(html)
         extractor = SectionExtractor(pages=[], filing_type="10-K", raw_html=parser.raw_html)
 
         from bs4 import BeautifulSoup
+
         soup = BeautifulSoup(parser.raw_html, "lxml")
         candidates = extractor._find_styled_section_candidates(soup)
 
@@ -211,7 +198,7 @@ class TestStylingBasedExtraction:
 
     def test_color_format_handling(self):
         """Verify detection works with hex, rgb(), and named colors."""
-        html = '''
+        html = """
         <html><body>
         <div style="font-weight:bold;font-size:14pt;color:#003366">Business</div>
         <p style="font-size:11pt">Our company operates in multiple business segments providing various products and services to customers worldwide. We have a diversified portfolio and strong market positions across our key business lines. Our business strategy focuses on innovation, operational excellence, and customer satisfaction. We invest significantly in research and development to maintain our competitive advantage and drive long-term growth. Additional content to reach character threshold for testing purposes with more descriptive business information about our operations, markets, and competitive positioning.</p>
@@ -220,11 +207,13 @@ class TestStylingBasedExtraction:
         <div style="font-weight:bold;font-size:14pt;color:navy">Legal Proceedings</div>
         <p style="font-size:11pt">We are involved in various legal proceedings and claims arising in the ordinary course of business across multiple jurisdictions. While the outcome of these matters cannot be predicted with certainty, we do not believe that any of these proceedings will have a material adverse effect on our financial position or results of operations based on current information. We maintain comprehensive insurance coverage and establish reserves where appropriate to mitigate potential liabilities. Our experienced legal team actively manages all litigation matters and works closely with external counsel to protect the company's interests.</p>
         </body></html>
-        '''
+        """
 
         parser = Parser(html)
         pages = parser.get_pages(include_elements=False)
-        extractor = SectionExtractor(pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html)
+        extractor = SectionExtractor(
+            pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html
+        )
 
         sections = extractor.get_sections()
         section_items = {s.item for s in sections}
@@ -236,10 +225,12 @@ class TestStylingBasedExtraction:
     def test_fallback_ordering(self):
         """Verify pattern → styling → TOC fallback order."""
         # Standard format should use pattern extraction
-        standard_html = '<html><body><p>PART I</p><p>ITEM 1. Business</p></body></html>'
+        standard_html = "<html><body><p>PART I</p><p>ITEM 1. Business</p></body></html>"
         parser = Parser(standard_html)
         pages = parser.get_pages(include_elements=False)
-        extractor = SectionExtractor(pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html)
+        extractor = SectionExtractor(
+            pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html
+        )
 
         sections = extractor.get_sections()
         # Should extract via pattern (will see "PART I" in markdown)
@@ -256,10 +247,7 @@ class TestRegressionPrevention:
             pages = parser.get_pages(include_elements=False)
 
             extractor = SectionExtractor(
-                pages=pages,
-                filing_type="10-K",
-                debug=True,
-                raw_html=parser.raw_html
+                pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html
             )
 
             sections = extractor.get_sections()
@@ -272,7 +260,9 @@ class TestRegressionPrevention:
             content = risk_section.markdown()
 
             # Risk Factors sections are typically very long
-            assert len(content) > 5000, f"{name} ITEM 1A should have substantial content (>5000 chars)"
+            assert (
+                len(content) > 5000
+            ), f"{name} ITEM 1A should have substantial content (>5000 chars)"
 
     def test_both_formats_extract_md_and_a(self, intel_html, microsoft_html):
         """Both Intel and Microsoft should extract MD&A (ITEM 7)."""
@@ -281,10 +271,7 @@ class TestRegressionPrevention:
             pages = parser.get_pages(include_elements=False)
 
             extractor = SectionExtractor(
-                pages=pages,
-                filing_type="10-K",
-                debug=True,
-                raw_html=parser.raw_html
+                pages=pages, filing_type="10-K", debug=True, raw_html=parser.raw_html
             )
 
             sections = extractor.get_sections()
@@ -297,4 +284,6 @@ class TestRegressionPrevention:
             content = mda_section.markdown()
 
             # MD&A sections are typically very long
-            assert len(content) > 5000, f"{name} ITEM 7 should have substantial content (>5000 chars)"
+            assert (
+                len(content) > 5000
+            ), f"{name} ITEM 7 should have substantial content (>5000 chars)"

@@ -5,7 +5,8 @@ from bs4 import Tag
 from collections import defaultdict
 from typing import List, Optional, Tuple, Dict
 
-NUMERIC_RE = re.compile(r"""
+NUMERIC_RE = re.compile(
+    r"""
     ^\s*
     [\(\[]?                      # optional opening paren/bracket
     [\-—–]?\s*                   # optional dash
@@ -14,7 +15,9 @@ NUMERIC_RE = re.compile(r"""
     (?:[.,]\d+)?                # decimals
     \s*%?                       # optional percent
     [\)\]]?\s*$                 # optional closing paren/bracket
-""", re.X)
+""",
+    re.X,
+)
 
 
 def median(values: List[float]) -> float:
@@ -51,8 +54,8 @@ class AbsolutelyPositionedTableParser:
         if not isinstance(el, Tag):
             return None
         style = el.get("style", "")
-        left_match = re.search(r'left:\s*(\d+(?:\.\d+)?)px', style)
-        top_match = re.search(r'top:\s*(\d+(?:\.\d+)?)px', style)
+        left_match = re.search(r"left:\s*(\d+(?:\.\d+)?)px", style)
+        top_match = re.search(r"top:\s*(\d+(?:\.\d+)?)px", style)
         if left_match and top_match:
             return (float(left_match.group(1)), float(top_match.group(1)))
         return None
@@ -61,7 +64,7 @@ class AbsolutelyPositionedTableParser:
         """Extract and clean text from an element."""
         text = element.get_text(separator=" ", strip=True)
         text = text.replace("\u200b", "").replace("\ufeff", "").replace("\xa0", " ")
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = re.sub(r"\s+", " ", text).strip()
         return text
 
     def _is_bold(self, el: Tag) -> bool:
@@ -80,11 +83,11 @@ class AbsolutelyPositionedTableParser:
 
         style = el.get("style", "").lower().replace(" ", "")
         text = el.get_text(strip=True)
-        has_nbsp = '\xa0' in str(el) or '&nbsp;' in str(el)
-        width_match = re.search(r'width:(\d+)px', style)
+        has_nbsp = "\xa0" in str(el) or "&nbsp;" in str(el)
+        width_match = re.search(r"width:(\d+)px", style)
 
-        is_inline_block = 'display:inline-block' in style
-        is_empty_or_nbsp = (not text or has_nbsp)
+        is_inline_block = "display:inline-block" in style
+        is_empty_or_nbsp = not text or has_nbsp
         is_narrow = width_match and int(width_match.group(1)) < 30
 
         return is_inline_block and is_empty_or_nbsp and is_narrow
@@ -113,7 +116,9 @@ class AbsolutelyPositionedTableParser:
                 positioned.append((left, top, el))
         return positioned
 
-    def _filter_table_content(self, elements: List[Tuple[float, float, Tag]]) -> List[Tuple[float, float, Tag]]:
+    def _filter_table_content(
+        self, elements: List[Tuple[float, float, Tag]]
+    ) -> List[Tuple[float, float, Tag]]:
         """
         Filter out title/caption text that appears before the actual table.
 
@@ -150,7 +155,7 @@ class AbsolutelyPositionedTableParser:
         table_start_y = min(top for _, top, _ in row_counts[table_start_row])
 
         # Filter out elements that are significantly above the table start (>30px)
-        filtered = [(l, t, e) for l, t, e in elements if t >= table_start_y - 30]
+        filtered = [(left, top, elem) for left, top, elem in elements if top >= table_start_y - 30]
 
         return filtered if len(filtered) >= 6 else elements  # Sanity check
 
@@ -221,7 +226,8 @@ class AbsolutelyPositionedTableParser:
         # CRITICAL: Check for numeric content - tables should have numbers
         # Use robust numeric pattern
         elements_with_numbers = sum(
-            1 for _, _, el in filtered_elements
+            1
+            for _, _, el in filtered_elements
             if not self._is_spacer(el) and self._contains_number(self._clean_text(el))
         )
         numeric_ratio = elements_with_numbers / len(filtered_elements)
@@ -231,7 +237,9 @@ class AbsolutelyPositionedTableParser:
             return False
 
         # Check average text length - tables have short cell content
-        avg_length = sum(len(self._clean_text(el)) for _, _, el in filtered_elements) / len(filtered_elements)
+        avg_length = sum(len(self._clean_text(el)) for _, _, el in filtered_elements) / len(
+            filtered_elements
+        )
 
         # If average cell is > 50 characters, probably paragraph text, not a table
         if avg_length > 50:
@@ -239,8 +247,9 @@ class AbsolutelyPositionedTableParser:
 
         # Check for sentence structures (periods indicating prose)
         text_with_periods = sum(
-            1 for _, _, el in filtered_elements
-            if '.' in self._clean_text(el) and len(self._clean_text(el)) > 20
+            1
+            for _, _, el in filtered_elements
+            if "." in self._clean_text(el) and len(self._clean_text(el)) > 20
         )
 
         # If >40% of cells have periods and long text, probably prose
@@ -275,7 +284,8 @@ class AbsolutelyPositionedTableParser:
         for col_id, elements in col_elements.items():
             if len(elements) >= 2:
                 numeric_in_col = sum(
-                    1 for el in elements
+                    1
+                    for el in elements
                     if not self._is_spacer(el) and self._contains_number(self._clean_text(el))
                 )
                 if numeric_in_col / len(elements) > 0.5:
@@ -409,7 +419,7 @@ class AbsolutelyPositionedTableParser:
         if not markdown:
             return ""
 
-        lines = markdown.strip().split('\n')
+        lines = markdown.strip().split("\n")
         if len(lines) < 3:  # Need at least header, separator, one data row
             return markdown
 
@@ -417,8 +427,8 @@ class AbsolutelyPositionedTableParser:
         rows = []
         separator_idx = -1
         for i, line in enumerate(lines):
-            cells = [c.strip() for c in line.split('|')[1:-1]]  # Remove leading/trailing |
-            if all(c in ['---', ''] for c in cells):
+            cells = [c.strip() for c in line.split("|")[1:-1]]  # Remove leading/trailing |
+            if all(c in ["---", ""] for c in cells):
                 separator_idx = i
                 rows.append(cells)
             else:
@@ -433,15 +443,17 @@ class AbsolutelyPositionedTableParser:
                 return False
 
             # Check if mostly empty
-            non_empty = [c for c in row if c and c != '---']
+            non_empty = [c for c in row if c and c != "---"]
             if len(non_empty) == 0:
                 return True
-            if len(non_empty) == 1 and len(non_empty[0]) < 5:  # Single short cell (like page number)
+            if (
+                len(non_empty) == 1 and len(non_empty[0]) < 5
+            ):  # Single short cell (like page number)
                 return True
 
             # Check if it's a footnote (starts with (a), (b), etc.)
             first_non_empty = next((c for c in row if c), "")
-            if re.match(r'^\([a-z]\)', first_non_empty):
+            if re.match(r"^\([a-z]\)", first_non_empty):
                 return True
 
             # Check if one very long cell (footnote text) and rest empty
@@ -464,7 +476,7 @@ class AbsolutelyPositionedTableParser:
             if row_idx == separator_idx:  # Skip separator
                 continue
             for col_idx, cell in enumerate(row):
-                if col_idx < n_cols and cell and cell != '---':
+                if col_idx < n_cols and cell and cell != "---":
                     col_has_content[col_idx] = True
 
         # Remove completely empty columns
@@ -486,7 +498,9 @@ class AbsolutelyPositionedTableParser:
 
         return "\n".join(result_lines)
 
-    def _join_lines(self, prev: str, current: str, gap: float, median_gap: float) -> Tuple[str, bool]:
+    def _join_lines(
+        self, prev: str, current: str, gap: float, median_gap: float
+    ) -> Tuple[str, bool]:
         """
         Smart line joining with hyphenation handling.
 
@@ -500,7 +514,7 @@ class AbsolutelyPositionedTableParser:
             Tuple of (joined_text, should_add_newline)
         """
         # Hyphenated word continuation
-        if prev.endswith('-'):
+        if prev.endswith("-"):
             # Check if it's likely a hyphenated word (next starts with lowercase)
             if current and current[0].islower():
                 # Remove hyphen and join directly
@@ -510,7 +524,7 @@ class AbsolutelyPositionedTableParser:
                 return (prev + " " + current, False)
 
         # Check if previous line looks like it continues (no terminal punctuation)
-        ends_with_continuation = not prev.rstrip().endswith(('.', '!', '?', ':', ';', ')', ']'))
+        ends_with_continuation = not prev.rstrip().endswith((".", "!", "?", ":", ";", ")", "]"))
 
         # Small gap + continuation = join with space
         if ends_with_continuation and gap < 1.4 * median_gap:
@@ -535,9 +549,17 @@ class AbsolutelyPositionedTableParser:
             return ""
 
         y_coords = [top for _, top, _ in sorted_elements]
-        median_line_gap = median([y_coords[i + 1] - y_coords[i]
-                                  for i in range(len(y_coords) - 1)
-                                  if y_coords[i + 1] - y_coords[i] > 1]) if len(y_coords) > 1 else 15.0
+        median_line_gap = (
+            median(
+                [
+                    y_coords[i + 1] - y_coords[i]
+                    for i in range(len(y_coords) - 1)
+                    if y_coords[i + 1] - y_coords[i] > 1
+                ]
+            )
+            if len(y_coords) > 1
+            else 15.0
+        )
 
         rows = []
         current_row = []
@@ -595,19 +617,24 @@ class AbsolutelyPositionedTableParser:
 
                 # Check if current line is a bold header
                 is_header = (
-                        any(self._is_bold(el) for _, _, el in row if not self._is_spacer(el)) and
-                        all(self._is_bold(el) for _, _, el in row if
-                            not self._is_spacer(el) and self._clean_text(el)) and
-                        len(line) < 80
+                    any(self._is_bold(el) for _, _, el in row if not self._is_spacer(el))
+                    and all(
+                        self._is_bold(el)
+                        for _, _, el in row
+                        if not self._is_spacer(el) and self._clean_text(el)
+                    )
+                    and len(line) < 80
                 )
 
-                if is_header and not prev_line.endswith('-'):
+                if is_header and not prev_line.endswith("-"):
                     # Add blank line before header
                     lines.append("")
                     lines.append(line)
                 else:
                     # Use smart joining
-                    joined_text, needs_newline = self._join_lines(prev_line, line, gap, median_line_gap)
+                    joined_text, needs_newline = self._join_lines(
+                        prev_line, line, gap, median_line_gap
+                    )
 
                     if needs_newline:
                         # Replace last line with joined text and add current as new line

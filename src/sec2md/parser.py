@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class TextBlockInfo:
     """Tracks XBRL TextBlock context during parsing."""
+
     name: str  # e.g., "us-gaap:DebtDisclosureTextBlock"
     title: Optional[str] = None  # e.g., "Note 9 – Debt"
 
@@ -40,7 +41,9 @@ class Parser:
         self.includes_table = False
         self.pages: Dict[int, List[str]] = defaultdict(list)
         # Track DOM provenance and TextBlock: (content, source_node, text_block_info)
-        self.page_segments: Dict[int, List[Tuple[str, Optional[Tag], Optional[TextBlockInfo]]]] = defaultdict(list)
+        self.page_segments: Dict[int, List[Tuple[str, Optional[Tag], Optional[TextBlockInfo]]]] = (
+            defaultdict(list)
+        )
         self.input_char_count = len(self.soup.get_text())
 
         # Track current TextBlock context
@@ -59,13 +62,13 @@ class Parser:
         """Check if element is an ix:nonnumeric with a note-level TextBlock name."""
         if not isinstance(el, Tag):
             return False
-        if el.name not in ('ix:nonnumeric', 'nonnumeric'):
+        if el.name not in ("ix:nonnumeric", "nonnumeric"):
             return False
-        name = el.get('name', '')
-        if 'TextBlock' not in name:
+        name = el.get("name", "")
+        if "TextBlock" not in name:
             return False
 
-        return name.startswith('us-gaap:') or name.startswith('cyd:')
+        return name.startswith("us-gaap:") or name.startswith("cyd:")
 
     @staticmethod
     def _find_text_block_tag_in_children(el: Tag) -> Optional[Tag]:
@@ -91,19 +94,20 @@ class Parser:
         """Extract TextBlock name and title from ix:nonnumeric tag."""
         if not isinstance(el, Tag):
             return None
-        name = el.get('name', '')
-        if not name or 'TextBlock' not in name:
+        name = el.get("name", "")
+        if not name or "TextBlock" not in name:
             return None
 
-        tag_text = el.get_text(strip=True) or ''
+        tag_text = el.get_text(strip=True) or ""
 
         if tag_text and len(tag_text) < 200:
             title = tag_text
         else:
             import re
-            name_part = name.split(':')[-1].replace('TextBlock', '')
-            title = re.sub(r'([A-Z])', r' \1', name_part).strip()
-            title = re.sub(r'\s+', ' ', title)
+
+            name_part = name.split(":")[-1].replace("TextBlock", "")
+            title = re.sub(r"([A-Z])", r" \1", name_part).strip()
+            title = re.sub(r"\s+", " ", title)
 
         return TextBlockInfo(name=name, title=title)
 
@@ -112,28 +116,21 @@ class Parser:
         """Check if element is an ix:continuation tag."""
         if not isinstance(el, Tag):
             return False
-        return el.name in ('ix:continuation', 'continuation')
+        return el.name in ("ix:continuation", "continuation")
 
     @staticmethod
     def _is_bold(el: Tag) -> bool:
         if not isinstance(el, Tag):
             return False
         style = (el.get("style") or "").lower()
-        return (
-                "font-weight:700" in style
-                or "font-weight:bold" in style
-                or el.name in BOLD_TAGS
-        )
+        return "font-weight:700" in style or "font-weight:bold" in style or el.name in BOLD_TAGS
 
     @staticmethod
     def _is_italic(el: Tag) -> bool:
         if not isinstance(el, Tag):
             return False
         style = (el.get("style") or "").lower()
-        return (
-                "font-style:italic" in style
-                or el.name in ITALIC_TAGS
-        )
+        return "font-style:italic" in style or el.name in ITALIC_TAGS
 
     @staticmethod
     def _is_block(el: Tag) -> bool:
@@ -164,12 +161,12 @@ class Parser:
         style = el.get("style", "")
 
         # Try top: first
-        m_top = re.search(r'top:\s*(\d+(?:\.\d+)?)px', style)
+        m_top = re.search(r"top:\s*(\d+(?:\.\d+)?)px", style)
         if m_top:
             return float(m_top.group(1))
 
         # Try bottom: - place near end of page
-        m_bot = re.search(r'bottom:\s*(\d+(?:\.\d+)?)px', style)
+        m_bot = re.search(r"bottom:\s*(\d+(?:\.\d+)?)px", style)
         if m_bot:
             # Synthesize top position (larger Y = bottom of page)
             return fallback_height - float(m_bot.group(1))
@@ -190,9 +187,9 @@ class Parser:
             return False
         style = (el.get("style") or "").lower().replace(" ", "")
         return (
-                "page-break-before:always" in style
-                or "break-before:page" in style
-                or "break-before:always" in style
+            "page-break-before:always" in style
+            or "break-before:page" in style
+            or "break-before:always" in style
         )
 
     @staticmethod
@@ -201,9 +198,9 @@ class Parser:
             return False
         style = (el.get("style") or "").lower().replace(" ", "")
         return (
-                "page-break-after:always" in style
-                or "break-after:page" in style
-                or "break-after:always" in style
+            "page-break-after:always" in style
+            or "break-after:page" in style
+            or "break-after:always" in style
         )
 
     @staticmethod
@@ -232,11 +229,20 @@ class Parser:
             return "*"
         return ""
 
-    def _try_merge_inline_spans(self, last_text: str, current_text: str, last_source: Optional[Tag],
-                                 current_source: Optional[Tag]) -> Optional[str]:
+    def _try_merge_inline_spans(
+        self,
+        last_text: str,
+        current_text: str,
+        last_source: Optional[Tag],
+        current_source: Optional[Tag],
+    ) -> Optional[str]:
         """Try to merge consecutive inline spans from the same parent."""
-        if not (last_source and current_source and
-                isinstance(last_source, Tag) and isinstance(current_source, Tag)):
+        if not (
+            last_source
+            and current_source
+            and isinstance(last_source, Tag)
+            and isinstance(current_source, Tag)
+        ):
             return None
 
         if last_source.parent != current_source.parent:
@@ -246,21 +252,30 @@ class Parser:
         current_stripped = current_text.lstrip()
 
         # Merge **text** **text** -> **text text** (preserve whitespace between)
-        if last_stripped.endswith('**') and current_stripped.startswith('**'):
-            last_ws = last_text[len(last_stripped):]
-            current_ws = current_text[:len(current_text) - len(current_stripped)]
+        if last_stripped.endswith("**") and current_stripped.startswith("**"):
+            last_ws = last_text[len(last_stripped) :]
+            current_ws = current_text[: len(current_text) - len(current_stripped)]
             return last_stripped[:-2] + last_ws + current_ws + current_stripped[2:]
 
         # Merge *text* *text* -> *text text* (but not bold)
-        if (last_stripped.endswith('*') and current_stripped.startswith('*') and
-            not last_stripped.endswith('**')):
-            last_ws = last_text[len(last_stripped):]
-            current_ws = current_text[:len(current_text) - len(current_stripped)]
+        if (
+            last_stripped.endswith("*")
+            and current_stripped.startswith("*")
+            and not last_stripped.endswith("**")
+        ):
+            last_ws = last_text[len(last_stripped) :]
+            current_ws = current_text[: len(current_text) - len(current_stripped)]
             return last_stripped[:-1] + last_ws + current_ws + current_stripped[1:]
 
         return None
 
-    def _append(self, page_num: int, s: str, source_node: Optional[Tag] = None, text_block: Optional[TextBlockInfo] = None) -> None:
+    def _append(
+        self,
+        page_num: int,
+        s: str,
+        source_node: Optional[Tag] = None,
+        text_block: Optional[TextBlockInfo] = None,
+    ) -> None:
         if not s:
             return
 
@@ -362,19 +377,19 @@ class Parser:
         if not text:
             return None
 
-        m = re.search(r'\|\s*(\d{1,4})\s*$', text)
+        m = re.search(r"\|\s*(\d{1,4})\s*$", text)
         if m:
             num = int(m.group(1))
             if 1 <= num <= 9999 and not (1900 <= num <= 2100):
                 return num
 
-        m = re.search(r'\bPage\s+(\d{1,4})\b', text, re.IGNORECASE)
+        m = re.search(r"\bPage\s+(\d{1,4})\b", text, re.IGNORECASE)
         if m:
             num = int(m.group(1))
             if 1 <= num <= 9999 and not (1900 <= num <= 2100):
                 return num
 
-        m = re.search(r'\b(\d{1,4})\s*$', text)
+        m = re.search(r"\b(\d{1,4})\s*$", text)
         if m:
             num = int(m.group(1))
             if 10 <= num <= 9999 and not (1900 <= num <= 2100):
@@ -398,7 +413,9 @@ class Parser:
         text = el.get_text(" ", strip=True)
         if text and len(text) < 200:
             text_lower = text.lower()
-            if any(keyword in text_lower for keyword in ["form 10-k", "form 10-q", "form 8-k", "page"]):
+            if any(
+                keyword in text_lower for keyword in ["form 10-k", "form 10-q", "form 8-k", "page"]
+            ):
                 return True
 
         return False
@@ -428,7 +445,9 @@ class Parser:
         gaps = [g for g in gaps if 5 < g < 100]
         return gaps
 
-    def _split_positioned_groups(self, elements: List[Tag], gap_threshold: Optional[float] = None) -> List[List[Tag]]:
+    def _split_positioned_groups(
+        self, elements: List[Tag], gap_threshold: Optional[float] = None
+    ) -> List[List[Tag]]:
         """Split positioned elements into separate groups using adaptive gap threshold."""
         if not elements:
             return []
@@ -438,7 +457,9 @@ class Parser:
             if line_gaps:
                 median_gap = median(line_gaps)
                 gap_threshold = min(1.2 * median_gap, 30.0)
-                logger.debug(f"Adaptive gap threshold: {gap_threshold:.1f}px (median line gap: {median_gap:.1f}px)")
+                logger.debug(
+                    f"Adaptive gap threshold: {gap_threshold:.1f}px (median line gap: {median_gap:.1f}px)"
+                )
             else:
                 gap_threshold = 30.0
 
@@ -475,7 +496,9 @@ class Parser:
             split_groups = self._split_by_column_transition(group)
             final_groups.extend(split_groups)
 
-        logger.debug(f"Split {len(elements)} elements into {len(final_groups)} groups (threshold: {gap_threshold:.1f}px)")
+        logger.debug(
+            f"Split {len(elements)} elements into {len(final_groups)} groups (threshold: {gap_threshold:.1f}px)"
+        )
         return final_groups
 
     def _split_by_column_transition(self, elements: List[Tag]) -> List[List[Tag]]:
@@ -486,7 +509,7 @@ class Parser:
         element_data = []
         for el in elements:
             style = el.get("style", "")
-            left_match = re.search(r'left:\s*(\d+(?:\.\d+)?)px', style)
+            left_match = re.search(r"left:\s*(\d+(?:\.\d+)?)px", style)
             y = self._extract_top_px(el)
             if left_match and y is not None:
                 left = float(left_match.group(1))
@@ -522,11 +545,14 @@ class Parser:
             next_cols = count_columns(rows[i + 1])
 
             if current_cols >= 2 and next_cols == 1:
-                following_single = sum(1 for j in range(i + 1, min(i + 4, len(rows)))
-                                       if count_columns(rows[j]) == 1)
+                following_single = sum(
+                    1 for j in range(i + 1, min(i + 4, len(rows))) if count_columns(rows[j]) == 1
+                )
                 if following_single >= 2:
                     split_point = i + 1
-                    logger.debug(f"Column transition detected at row {i + 1} ({current_cols} cols -> {next_cols} col)")
+                    logger.debug(
+                        f"Column transition detected at row {i + 1} ({current_cols} cols -> {next_cols} col)"
+                    )
                     break
 
         if split_point is None:
@@ -564,7 +590,9 @@ class Parser:
                 display_page = self._extract_page_number_from_footer(child)
                 if display_page is not None:
                     self.footer_page_numbers[page_num] = display_page
-                    logger.debug(f"Extracted display_page={display_page} from footer on page {page_num}")
+                    logger.debug(
+                        f"Extracted display_page={display_page} from footer on page {page_num}"
+                    )
             else:
                 content_elements.append(child)
 
@@ -620,12 +648,12 @@ class Parser:
         # Check if this is a continuation tag
         continuation_ends_text_block = False
         if self._is_continuation_tag(root):
-            cont_id = root.get('id')
+            cont_id = root.get("id")
             if cont_id and cont_id in self.continuation_map:
                 self.current_text_block = self.continuation_map[cont_id]
                 text_block_started = True
                 # Check if continues further
-                continuedat = root.get('continuedat')
+                continuedat = root.get("continuedat")
                 if continuedat:
                     text_block_has_continuation = True
                     self.continuation_map[continuedat] = self.current_text_block
@@ -658,8 +686,12 @@ class Parser:
 
         # Inline-display elements should not trigger blocks
         is_inline_display = self._is_inline_display(root)
-        is_block = self._is_block(root) and root.name not in {"br",
-                                                              "hr"} and not is_inline_display and not is_absolutely_positioned
+        is_block = (
+            self._is_block(root)
+            and root.name not in {"br", "hr"}
+            and not is_inline_display
+            and not is_absolutely_positioned
+        )
 
         # Check if this block element contains a TextBlock tag in its children
         # ALWAYS check block elements for new TextBlocks (not just when current_text_block is None)
@@ -671,14 +703,14 @@ class Parser:
                 if tb_info:
                     # Only set if it's a DIFFERENT TextBlock (ignore nested duplicates)
                     is_new_text_block = (
-                        self.current_text_block is None or
-                        self.current_text_block.name != tb_info.name
+                        self.current_text_block is None
+                        or self.current_text_block.name != tb_info.name
                     )
                     if is_new_text_block:
                         self.current_text_block = tb_info
                         text_block_started = True
                         # Check for continuedat attribute ON THE TAG ITSELF
-                        continuedat = tb_tag.get('continuedat')
+                        continuedat = tb_tag.get("continuedat")
                         if continuedat:
                             text_block_has_continuation = True
                             self.continuation_map[continuedat] = tb_info
@@ -781,7 +813,7 @@ class Parser:
         if not content:
             return None
 
-        lines = content.split('\n')
+        lines = content.split("\n")
 
         check_lines = []
         if len(lines) >= 3:
@@ -796,15 +828,15 @@ class Parser:
             if len(line) > 100:
                 continue
 
-            if re.match(r'^\d{1,4}$', line):
+            if re.match(r"^\d{1,4}$", line):
                 num = int(line)
                 if 10 <= num <= 9999 and not (1900 <= num <= 2100):
                     return num
 
             patterns = [
-                r'\bPage\s+(\d{1,4})\b',
-                r'\b(\d{1,4})\s*\|',
-                r'\|\s*(\d{1,4})\b',
+                r"\bPage\s+(\d{1,4})\b",
+                r"\b(\d{1,4})\s*\|",
+                r"\|\s*(\d{1,4})\b",
             ]
 
             for pattern in patterns:
@@ -871,7 +903,9 @@ class Parser:
 
         part_line = lines[idx].strip()
         # Allow optional markdown bold/underline wrappers around PART
-        if not re.match(r"^(?:\*\*|__)?\s*PART\s+[IVXLC]+\s*(?:\*\*|__)?$", part_line, re.IGNORECASE):
+        if not re.match(
+            r"^(?:\*\*|__)?\s*PART\s+[IVXLC]+\s*(?:\*\*|__)?$", part_line, re.IGNORECASE
+        ):
             return content
 
         # Advance to potential ITEM line, skipping up to one blank run
@@ -885,9 +919,11 @@ class Parser:
         item_line = lines[idx].strip()
         # Require ITEM <num>[suffix] with optional trailing list of other item numbers
         # e.g., \"ITEM 2\" or \"ITEM 2, 3, 4\" or \"ITEM 9, 9A\"
-        if not re.match(r'^(?:\*\*|__)?\s*ITEM\s+\d{1,2}[A-Z]?(?:\s*,\s*\d{1,2}[A-Z]?)*\s*(?:\*\*|__)?$',
-                        item_line,
-                        re.IGNORECASE):
+        if not re.match(
+            r"^(?:\*\*|__)?\s*ITEM\s+\d{1,2}[A-Z]?(?:\s*,\s*\d{1,2}[A-Z]?)*\s*(?:\*\*|__)?$",
+            item_line,
+            re.IGNORECASE,
+        ):
             return content
 
         # Drop PART/ITEM lines and any immediate blank lines after them
@@ -941,8 +977,10 @@ class Parser:
     def _effective_rows(self, table: Tag) -> list[list[Tag]]:
         """Return rows that have at least one non-empty td/th."""
         rows = []
-        for tr in table.find_all('tr', recursive=True):
-            cells = tr.find_all(['td', 'th'], recursive=False) or tr.find_all(['td', 'th'], recursive=True)
+        for tr in table.find_all("tr", recursive=True):
+            cells = tr.find_all(["td", "th"], recursive=False) or tr.find_all(
+                ["td", "th"], recursive=True
+            )
             texts = [self._clean_text(c.get_text(" ", strip=True)) for c in cells]
             if any(texts):
                 rows.append(cells)
@@ -955,12 +993,12 @@ class Parser:
             return ""
 
         first = texts[0]
-        if (m := ITEM_HEADER_CELL_RE.match(first)):
+        if m := ITEM_HEADER_CELL_RE.match(first):
             num = m.group(1).upper()
             title = next((t for t in texts[1:] if t), "")
             return f"ITEM {num}. {title}".strip()
 
-        if (m := PART_HEADER_CELL_RE.match(first)):
+        if m := PART_HEADER_CELL_RE.match(first):
             roman = m.group(1).upper()
             return f"PART {roman}"
 
@@ -1003,7 +1041,7 @@ class Parser:
             page_content = page.content
             current_offset = 0
             for element in elements:
-                search_text = element.content[:min(100, len(element.content))]
+                search_text = element.content[: min(100, len(element.content))]
                 idx = page_content.find(search_text, current_offset)
 
                 if idx >= 0:
@@ -1028,11 +1066,9 @@ class Parser:
                 element_ids = text_block_map.get(tb_name, [])
                 if element_ids:
                     tb_elements = [element_map[eid] for eid in element_ids if eid in element_map]
-                    text_blocks.append(TextBlock(
-                        name=tb_name,
-                        title=tb_info.title,
-                        elements=tb_elements
-                    ))
+                    text_blocks.append(
+                        TextBlock(name=tb_name, title=tb_info.title, elements=tb_elements)
+                    )
 
             page_text_blocks[page_num] = text_blocks
 
@@ -1042,13 +1078,15 @@ class Parser:
         for page in pages:
             elements = page_elements.get(page.number, [])
             text_blocks = page_text_blocks.get(page.number, [])
-            result.append(Page(
-                number=page.number,
-                content=page.content,
-                elements=elements if elements else None,
-                text_blocks=text_blocks if text_blocks else None,
-                display_page=page.display_page
-            ))
+            result.append(
+                Page(
+                    number=page.number,
+                    content=page.content,
+                    elements=elements if elements else None,
+                    text_blocks=text_blocks if text_blocks else None,
+                    display_page=page.display_page,
+                )
+            )
 
         return result
 
@@ -1056,14 +1094,14 @@ class Parser:
         """Check if element is a bold header."""
         content = element.content.strip()
 
-        if not (content.startswith('**') and '**' in content[2:]):
+        if not (content.startswith("**") and "**" in content[2:]):
             return False
 
-        first_line = content.split('\n')[0].strip()
+        first_line = content.split("\n")[0].strip()
 
-        if first_line.startswith('**') and first_line.endswith('**'):
+        if first_line.startswith("**") and first_line.endswith("**"):
             bold_text = first_line[2:-2].strip()
-            if len(bold_text) < 50 and bold_text.count('.') <= 1:
+            if len(bold_text) < 50 and bold_text.count(".") <= 1:
                 return True
 
         return False
@@ -1072,7 +1110,7 @@ class Parser:
         self,
         blocks_with_nodes: List[Tuple[Element, List[Tag], Optional[TextBlockInfo]]],
         page_num: int,
-        min_chars: int = 500
+        min_chars: int = 500,
     ) -> List[Tuple[Element, List[Tag], Optional[TextBlockInfo]]]:
         """Merge consecutive small blocks into larger semantic units."""
         if not blocks_with_nodes:
@@ -1089,13 +1127,13 @@ class Parser:
             if not current_elements:
                 return
 
-            merged_content = '\n\n'.join(e.content for e in current_elements)
+            merged_content = "\n\n".join(e.content for e in current_elements)
 
             kinds = [e.kind for e in current_elements]
-            if 'table' in kinds:
-                kind = 'table'
-            elif 'header' in kinds:
-                kind = 'section'
+            if "table" in kinds:
+                kind = "table"
+            elif "header" in kinds:
+                kind = "section"
             else:
                 kind = current_elements[0].kind
 
@@ -1106,7 +1144,7 @@ class Parser:
                 content=merged_content,
                 kind=kind,
                 page_start=page_num,
-                page_end=page_num
+                page_end=page_num,
             )
 
             merged.append((merged_element, list(current_nodes), current_text_block))
@@ -1129,7 +1167,7 @@ class Parser:
 
             current_text_block = text_block
 
-            if element.kind == 'table':
+            if element.kind == "table":
                 if current_elements and current_chars < min_chars:
                     current_elements.append(element)
                     current_nodes.extend([n for n in nodes if n not in current_nodes])
@@ -1178,7 +1216,9 @@ class Parser:
 
         return merged
 
-    def _group_segments_into_blocks(self, segments: List[Tuple[str, Optional[Tag], Optional[TextBlockInfo]]], page_num: int) -> List[Tuple[Element, List[Tag], Optional[TextBlockInfo]]]:
+    def _group_segments_into_blocks(
+        self, segments: List[Tuple[str, Optional[Tag], Optional[TextBlockInfo]]], page_num: int
+    ) -> List[Tuple[Element, List[Tag], Optional[TextBlockInfo]]]:
         """Group sequential segments into semantic blocks."""
         blocks = []
         current_block_segments = []
@@ -1191,10 +1231,7 @@ class Parser:
                 if current_block_segments and current_block_segments[-1] == "\n":
                     if len(current_block_segments) > 1:
                         block = self._create_block(
-                            current_block_segments[:-1],
-                            current_block_nodes,
-                            page_num,
-                            block_idx
+                            current_block_segments[:-1], current_block_nodes, page_num, block_idx
                         )
                         if block:
                             blocks.append((block, list(current_block_nodes), current_text_block))
@@ -1216,10 +1253,7 @@ class Parser:
 
             if current_block_segments:
                 block = self._create_block(
-                    current_block_segments,
-                    current_block_nodes,
-                    page_num,
-                    block_idx
+                    current_block_segments, current_block_nodes, page_num, block_idx
                 )
                 if block:
                     blocks.append((block, list(current_block_nodes), current_text_block))
@@ -1227,11 +1261,7 @@ class Parser:
         return blocks
 
     def _create_block(
-        self,
-        segments: List[str],
-        nodes: List[Tag],
-        page_num: int,
-        block_idx: int
+        self, segments: List[str], nodes: List[Tag], page_num: int, block_idx: int
     ) -> Optional[Element]:
         """Create an Element from segments and nodes."""
         content = "".join(segments).strip()
@@ -1245,11 +1275,7 @@ class Parser:
         block_id = self._generate_block_id(page_num, block_idx, content, kind)
 
         return Element(
-            id=block_id,
-            content=content,
-            kind=kind,
-            page_start=page_num,
-            page_end=page_num
+            id=block_id, content=content, kind=kind, page_start=page_num, page_end=page_num
         )
 
     def _infer_kind_from_nodes(self, nodes: List[Tag]) -> str:
@@ -1273,12 +1299,14 @@ class Parser:
     def _generate_block_id(self, page: int, idx: int, content: str, kind: str) -> str:
         """Generate stable block ID using normalized content hash."""
         # Normalize: collapse whitespace for stable hashing
-        normalized = re.sub(r'\s+', ' ', content.strip()).lower()
-        hash_part = hashlib.sha1(normalized.encode('utf-8')).hexdigest()[:8]
+        normalized = re.sub(r"\s+", " ", content.strip()).lower()
+        hash_part = hashlib.sha1(normalized.encode("utf-8")).hexdigest()[:8]
         kind_prefix = kind[0] if kind else "b"
         return f"sec2md-p{page}-{kind_prefix}{idx}-{hash_part}"
 
-    def _augment_html_with_ids(self, page_elements: Dict[int, List[Element]], block_nodes_map: Dict[str, List[Tag]]) -> None:
+    def _augment_html_with_ids(
+        self, page_elements: Dict[int, List[Element]], block_nodes_map: Dict[str, List[Tag]]
+    ) -> None:
         """Add id attributes and data-sec2md-block to DOM nodes."""
         seen_pages = set()
 
@@ -1293,21 +1321,21 @@ class Parser:
                 first_node = nodes[0]
 
                 if page_num not in seen_pages:
-                    if 'id' in first_node.attrs:
-                        existing_classes = first_node.get('class', [])
+                    if "id" in first_node.attrs:
+                        existing_classes = first_node.get("class", [])
                         if isinstance(existing_classes, str):
                             existing_classes = existing_classes.split()
                         existing_classes.append(f"page-{page_num}")
-                        first_node['class'] = existing_classes
+                        first_node["class"] = existing_classes
                     else:
-                        first_node['id'] = f"page-{page_num}"
+                        first_node["id"] = f"page-{page_num}"
                     seen_pages.add(page_num)
 
-                if 'id' not in first_node.attrs:
-                    first_node['id'] = element.id
+                if "id" not in first_node.attrs:
+                    first_node["id"] = element.id
 
                 for node in nodes:
-                    node['data-sec2md-block'] = element.id
+                    node["data-sec2md-block"] = element.id
 
     def markdown(self) -> str:
         """Get full document as markdown string."""

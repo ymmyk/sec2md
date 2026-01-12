@@ -12,7 +12,7 @@ def chunk_pages(
     chunk_size: int = 512,
     chunk_overlap: int = 128,
     max_table_tokens: int = 2048,
-    header: Optional[str] = None
+    header: Optional[str] = None,
 ) -> List[Chunk]:
     """
     Chunk pages into overlapping chunks.
@@ -34,7 +34,9 @@ def chunk_pages(
         ...     print(f"Page {chunk.page}: {chunk.content[:100]}...")
         ...     print(f"Elements: {chunk.elements}")
     """
-    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap, max_table_tokens=max_table_tokens)
+    chunker = Chunker(
+        chunk_size=chunk_size, chunk_overlap=chunk_overlap, max_table_tokens=max_table_tokens
+    )
     return chunker.split(pages=pages, header=header)
 
 
@@ -43,7 +45,7 @@ def chunk_section(
     chunk_size: int = 512,
     chunk_overlap: int = 128,
     max_table_tokens: int = 2048,
-    header: Optional[str] = None
+    header: Optional[str] = None,
 ) -> List[Chunk]:
     """
     Chunk a filing section into overlapping chunks.
@@ -68,7 +70,7 @@ def chunk_section(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         max_table_tokens=max_table_tokens,
-        header=header
+        header=header,
     )
 
 
@@ -98,14 +100,16 @@ def merge_text_blocks(pages: List[Page]) -> List[TextBlock]:
         Segment Reporting: pages 49-50
     """
     # Group by TextBlock name
-    tb_map = defaultdict(lambda: {
-        "name": None,
-        "title": None,
-        "elements": [],
-        "start_page": float('inf'),
-        "end_page": -1,
-        "pages": set()
-    })
+    tb_map = defaultdict(
+        lambda: {
+            "name": None,
+            "title": None,
+            "elements": [],
+            "start_page": float("inf"),
+            "end_page": -1,
+            "pages": set(),
+        }
+    )
 
     for page in pages:
         if page.text_blocks:
@@ -126,7 +130,7 @@ def merge_text_blocks(pages: List[Page]) -> List[TextBlock]:
             elements=tb_data["elements"],
             start_page=tb_data["start_page"],
             end_page=tb_data["end_page"],
-            source_pages=sorted(tb_data["pages"])
+            source_pages=sorted(tb_data["pages"]),
         )
         merged.append(tb)
 
@@ -138,7 +142,7 @@ def chunk_text_block(
     chunk_size: int = 512,
     chunk_overlap: int = 128,
     max_table_tokens: int = 2048,
-    header: Optional[str] = None
+    header: Optional[str] = None,
 ) -> List[Chunk]:
     """
     Chunk a single TextBlock (financial note).
@@ -172,13 +176,17 @@ def chunk_text_block(
         # Join content from elements on this page
         content = "\n\n".join(e.content for e in elems)
 
-        pages.append(Page(
-            number=page_num,     # Real page number
-            content=content,     # Only content from this page
-            elements=elems       # Only elements from this page
-            # Note: display_page not available here since TextBlocks don't preserve it
-        ))
+        pages.append(
+            Page(
+                number=page_num,  # Real page number
+                content=content,  # Only content from this page
+                elements=elems,  # Only elements from this page
+                # Note: display_page not available here since TextBlocks don't preserve it
+            )
+        )
 
-    chunker = Chunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap, max_table_tokens=max_table_tokens)
+    chunker = Chunker(
+        chunk_size=chunk_size, chunk_overlap=chunk_overlap, max_table_tokens=max_table_tokens
+    )
 
     return chunker.split(pages=pages, header=header)
