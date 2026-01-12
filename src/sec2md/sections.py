@@ -8,7 +8,8 @@ from sec2md.section_extractor import SectionExtractor
 def extract_sections(
     pages: List[Page],
     filing_type: FilingType,
-    debug: bool = False
+    debug: bool = False,
+    raw_html: Optional[str] = None
 ) -> List[Section]:
     """
     Extract sections from filing pages.
@@ -17,6 +18,8 @@ def extract_sections(
         pages: List of Page objects from convert_to_markdown(return_pages=True)
         filing_type: Type of filing ("10-K" or "10-Q")
         debug: Enable debug logging
+        raw_html: Optional raw HTML content for TOC-based extraction fallback
+                  (automatically passed when using parse_filing with return_raw_html=True)
 
     Returns:
         List of Section objects, each containing pages for that section
@@ -30,7 +33,8 @@ def extract_sections(
     extractor = SectionExtractor(
         pages=pages,
         filing_type=filing_type,
-        debug=debug
+        debug=debug,
+        raw_html=raw_html
     )
 
     # SectionExtractor now returns Section objects directly
