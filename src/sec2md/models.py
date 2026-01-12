@@ -304,6 +304,7 @@ class Page(BaseModel):
     elements: Optional[List[Element]] = Field(None, description="Citable elements on this page")
     text_blocks: Optional[List[TextBlock]] = Field(None, description="XBRL TextBlocks on this page")
     display_page: Optional[int] = Field(None, description="Original page number as shown in the filing (e.g., bottom of page)")
+    toc_metadata: Optional[dict] = Field(None, description="Table of contents anchor metadata for TOC-based section extraction")
 
     model_config = {"frozen": False, "arbitrary_types_allowed": True}
 

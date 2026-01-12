@@ -51,6 +51,9 @@ class Parser:
         # Track footer page numbers: page_num -> display_page
         self.footer_page_numbers: Dict[int, int] = {}
 
+        # Store raw HTML for TOC-based section extraction fallback
+        self.raw_html = content
+
     @staticmethod
     def _is_text_block_tag(el: Tag) -> bool:
         """Check if element is an ix:nonnumeric with a note-level TextBlock name."""
