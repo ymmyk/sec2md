@@ -51,6 +51,36 @@ from typing import Optional
 
 from sec2md.parser import Parser
 from sec2md.section_extractor import SectionExtractor
+from sec2md.models import Item10K, Item10Q
+
+
+# Standard item titles for 10-K and 10-Q filings
+STANDARD_ITEM_TITLES = {
+    # 10-K Items
+    "1": "Business",
+    "1A": "Risk Factors",
+    "1B": "Unresolved Staff Comments",
+    "1C": "Cybersecurity",
+    "2": "Properties",
+    "3": "Legal Proceedings",
+    "4": "Mine Safety Disclosures",
+    "5": "Market for Registrant's Common Equity",
+    "6": "Selected Financial Data",
+    "7": "Management's Discussion and Analysis",
+    "7A": "Quantitative and Qualitative Disclosures About Market Risk",
+    "8": "Financial Statements and Supplementary Data",
+    "9": "Changes in and Disagreements with Accountants",
+    "9A": "Controls and Procedures",
+    "9B": "Other Information",
+    "9C": "Disclosure Regarding Foreign Jurisdictions",
+    "10": "Directors, Executive Officers and Corporate Governance",
+    "11": "Executive Compensation",
+    "12": "Security Ownership of Certain Beneficial Owners and Management",
+    "13": "Certain Relationships and Related Transactions",
+    "14": "Principal Accountant Fees and Services",
+    "15": "Exhibits and Financial Statement Schedules",
+    "16": "Form 10-K Summary",
+}
 
 
 def detect_filing_type(html_content: str) -> Optional[str]:
@@ -77,8 +107,16 @@ def format_section_header(section) -> str:
         parts.append(section.part)
     if section.item:
         parts.append(section.item)
+
+    # Add custom title or standard title in parentheses
     if section.item_title:
         parts.append(f"- {section.item_title}")
+    elif section.item:
+        # Extract item number (e.g., "ITEM 1A" -> "1A")
+        item_code = section.item.replace("ITEM ", "").strip()
+        standard_title = STANDARD_ITEM_TITLES.get(item_code)
+        if standard_title:
+            parts.append(f"({standard_title})")
 
     return " ".join(parts)
 

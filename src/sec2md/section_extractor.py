@@ -431,7 +431,7 @@ class SectionExtractor:
             return 0.0
 
     def _extract_style_properties(self, element) -> dict:
-        """Parse style attribute to extract font-weight, font-size, color, font-family."""
+        """Parse style attribute to extract font-weight, font-size, color, font-family, background-color."""
         from bs4 import Tag
 
         if not isinstance(element, Tag):
@@ -480,6 +480,35 @@ class SectionExtractor:
             if hex_color:
                 properties["color_hex"] = hex_color
 
+        # Parse background-color (check element and parent table cell)
+        bg_match = re.search(
+            r"background-color:\s*([#\w()]+(?:,\s*\d+\s*)*\)?)", style_str, re.IGNORECASE
+        )
+        if bg_match:
+            bg_val = bg_match.group(1).strip()
+            if "rgb" in bg_val.lower():
+                bg_val = re.sub(r"\s*,\s*", ",", bg_val)
+            hex_bg = self._parse_color_to_hex(bg_val)
+            if hex_bg:
+                properties["bg_color_hex"] = hex_bg
+        else:
+            # Check parent td/th for background-color
+            parent_cell = element.find_parent(["td", "th"])
+            if parent_cell:
+                parent_style = parent_cell.get("style", "")
+                parent_bg_match = re.search(
+                    r"background-color:\s*([#\w()]+(?:,\s*\d+\s*)*\)?)",
+                    parent_style,
+                    re.IGNORECASE,
+                )
+                if parent_bg_match:
+                    bg_val = parent_bg_match.group(1).strip()
+                    if "rgb" in bg_val.lower():
+                        bg_val = re.sub(r"\s*,\s*", ",", bg_val)
+                    hex_bg = self._parse_color_to_hex(bg_val)
+                    if hex_bg:
+                        properties["bg_color_hex"] = hex_bg
+
         # Parse font-family
         family_match = re.search(r"font-family:\s*([^;]+)", style_str, re.IGNORECASE)
         if family_match:
@@ -500,11 +529,17 @@ class SectionExtractor:
         if elem_weight >= 700 and base_weight < 700:
             confidence += 0.3
 
-        # Compare font-size (+0.2 if element ≥2pt larger)
+        # Compare font-size (scale bonus based on size difference)
         elem_size = element_style.get("size_pt", 0)
         base_size = baseline_style.get("size_pt", 11)
-        if elem_size > 0 and elem_size >= base_size + 2:
-            confidence += 0.2
+        if elem_size > 0:
+            size_diff = elem_size - base_size
+            if size_diff >= 6:  # Very large header (e.g., 18pt vs 11pt)
+                confidence += 0.4
+            elif size_diff >= 3:  # Large header (e.g., 14pt vs 11pt)
+                confidence += 0.3
+            elif size_diff >= 2:  # Moderate header
+                confidence += 0.2
 
         # Compare color (+0.3 if colors differ significantly)
         elem_color = element_style.get("color_hex")
@@ -515,6 +550,13 @@ class SectionExtractor:
                 color_dist >= 0.2
             ):  # Significant color difference (lowered threshold for dark blues vs black)
                 confidence += 0.3
+
+        # Check background-color (+0.4 if element has distinct background)
+        elem_bg = element_style.get("bg_color_hex")
+        if elem_bg:
+            # Strong signal if background is not white/transparent
+            if elem_bg.lower() not in ["#ffffff", "#fff"]:
+                confidence += 0.4
 
         # Compare font-family (+0.2 if different)
         elem_family = element_style.get("font_family")
@@ -1096,13 +1138,52 @@ class SectionExtractor:
             else:
                 item_title = elem_text
 
+            # Find the content container (walk up tree if nested in table/div)
+            content_start = element
+            # If element is deeply nested (e.g., in table cell), walk up to find container
+            for _ in range(5):  # Max 5 levels up
+                parent = content_start.find_parent(["div", "table"])
+                if parent and parent.name == "table":
+                    # Tables are often section header containers, use parent div
+                    parent_div = parent.find_parent("div")
+                    if parent_div:
+                        content_start = parent_div
+                        break
+                elif parent and parent.name == "div":
+                    # Check if this div seems like a header container (small, has table)
+                    if parent.find("table") and len(parent.get_text(strip=True)) < 200:
+                        content_start = parent
+                        break
+                    else:
+                        break
+                else:
+                    break
+
             # Find end boundary (next section or end of document)
             if i + 1 < len(candidates_with_pos):
                 next_element = candidates_with_pos[i + 1][1]
-                # Extract content between current element and next element
+                # Find next element's content container
+                next_start = next_element
+                for _ in range(5):
+                    parent = next_start.find_parent(["div", "table"])
+                    if parent and parent.name == "table":
+                        parent_div = parent.find_parent("div")
+                        if parent_div:
+                            next_start = parent_div
+                            break
+                    elif parent and parent.name == "div":
+                        if parent.find("table") and len(parent.get_text(strip=True)) < 200:
+                            next_start = parent
+                            break
+                        else:
+                            break
+                    else:
+                        break
+
+                # Extract content between containers
                 content_parts = []
-                current = element.find_next_sibling()
-                while current and current != next_element:
+                current = content_start.find_next_sibling()
+                while current and current != next_start:
                     if hasattr(current, "get_text"):
                         content_parts.append(str(current))
                     current = (
@@ -1111,14 +1192,14 @@ class SectionExtractor:
                         else None
                     )
                     # Also check if we've passed the next element
-                    if current and next_element in current.find_all_previous():
+                    if current and next_start in current.find_all_previous():
                         break
 
                 section_html = "\n".join(content_parts)
             else:
                 # Last section - extract to end of document
                 content_parts = []
-                current = element.find_next_sibling()
+                current = content_start.find_next_sibling()
                 while current:
                     if hasattr(current, "get_text"):
                         content_parts.append(str(current))
@@ -1134,6 +1215,10 @@ class SectionExtractor:
             text_content = self._html_to_text(section_html) if section_html else ""
 
             # Only include sections with substantial content
+            self._log(
+                f"Candidate {item} ({keyword}): extracted {len(text_content)} chars, "
+                f"{len(content_parts)} parts"
+            )
             if len(text_content) > 500:
                 page = Page(
                     number=1,  # Styling-extracted content doesn't map to specific page numbers
@@ -1141,7 +1226,10 @@ class SectionExtractor:
                     elements=None,
                 )
 
-                sections.append(Section(part=part, item=item, item_title=item_title, pages=[page]))
+                section = Section(part=part, item=item, item_title=item_title, pages=[page])
+                # Store DOM position for sorting (temporary attribute)
+                section._dom_position = pos
+                sections.append(section)
                 self._log(f"Extracted {item} ({keyword}): {len(text_content)} chars")
 
         return sections
@@ -1204,6 +1292,8 @@ class SectionExtractor:
         sections = []
         for item, anchor_list in item_groups.items():
             all_text_parts = []
+            # Track position of first anchor for this item (for sorting)
+            first_anchor_pos = all_anchors[anchor_list[0][0]][1] if anchor_list else 0
 
             for anchor_idx, start_id in anchor_list:
                 # End boundary is the next anchor in document order
@@ -1261,9 +1351,10 @@ class SectionExtractor:
                         elements=None,
                     )
 
-                    sections.append(
-                        Section(part=part, item=item, item_title=item_title, pages=[page])
-                    )
+                    section = Section(part=part, item=item, item_title=item_title, pages=[page])
+                    # Store DOM position for sorting (temporary attribute)
+                    section._dom_position = first_anchor_pos
+                    sections.append(section)
                     self._log(
                         f"Extracted {item}: {len(combined)} chars from {len(all_text_parts)} parts"
                     )
@@ -1528,29 +1619,65 @@ class SectionExtractor:
                 self._log(
                     "Pattern-based extraction found 0 sections, trying styling-based extraction..."
                 )
-                sections = self._extract_sections_from_styling()
-                if sections:
-                    self._log(f"Styling-based extraction found {len(sections)} sections")
+                styling_sections = self._extract_sections_from_styling()
+
+                # If styling extraction found a reasonable number of sections, use it
+                if styling_sections and len(styling_sections) >= 2:
+                    self._log(f"Styling-based extraction found {len(styling_sections)} sections")
+                    sections = styling_sections
                 else:
-                    self._log(
-                        "Styling-based extraction found 0 sections, trying TOC table extraction..."
-                    )
-                    sections = self._extract_sections_from_toc_table()
-                    if sections:
+                    # Try TOC extraction (more comprehensive for complex filings)
+                    if styling_sections:
                         self._log(
-                            f"TOC table extraction succeeded: extracted {len(sections)} sections"
+                            f"Styling-based extraction found only {len(styling_sections)} section(s), "
+                            "trying TOC extraction..."
                         )
                     else:
                         self._log(
+                            "Styling-based extraction found 0 sections, trying TOC table extraction..."
+                        )
+
+                    toc_sections = self._extract_sections_from_toc_table()
+                    if not toc_sections:
+                        self._log(
                             "TOC table extraction found 0 sections, trying TOC anchor fallback..."
                         )
-                        sections = self._extract_sections_from_toc()
-                        if sections:
-                            self._log(
-                                f"TOC anchor fallback succeeded: extracted {len(sections)} sections"
-                            )
-                        else:
-                            self._log("All extraction methods found 0 sections")
+                        toc_sections = self._extract_sections_from_toc()
+
+                    if toc_sections:
+                        self._log(
+                            f"TOC extraction succeeded: extracted {len(toc_sections)} sections"
+                        )
+                        # Merge styling sections with TOC sections (prioritize TOC but add missing styling)
+                        if styling_sections:
+                            toc_items = {s.item for s in toc_sections}
+                            for styling_sec in styling_sections:
+                                if styling_sec.item not in toc_items:
+                                    self._log(
+                                        f"Adding {styling_sec.item} from styling extraction "
+                                        "(not found in TOC)"
+                                    )
+                                    toc_sections.append(styling_sec)
+
+                        # Sort merged sections by DOM position to maintain document order
+                        # Note: Styling positions are more reliable than TOC anchor positions
+                        # because TOC may have multiple anchors scattered throughout the document
+                        sections = sorted(
+                            toc_sections,
+                            key=lambda s: getattr(s, "_dom_position", float("inf")),
+                        )
+                        # Log positions for debugging
+                        if self.debug:
+                            for s in sections:
+                                pos = getattr(s, "_dom_position", "NO POS")
+                                self._log(f"  {s.item}: position={pos}")
+                        self._log(f"Sorted {len(sections)} sections by document position")
+                    elif styling_sections:
+                        # No TOC sections, use whatever styling found
+                        self._log("TOC extraction failed, using styling sections")
+                        sections = styling_sections
+                    else:
+                        self._log("All extraction methods found 0 sections")
 
             return sections
 
