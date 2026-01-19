@@ -287,3 +287,80 @@ class TestRegressionPrevention:
             assert (
                 len(content) > 5000
             ), f"{name} ITEM 7 should have substantial content (>5000 chars)"
+
+
+class TestMcDonaldsExtraction:
+    """Test extraction from McDonald's 10-K which uses styling-based section headers."""
+
+    @pytest.fixture
+    def mcd_html(self):
+        """Load McDonald's 10-K fixture."""
+        import os
+
+        fixture_path = os.path.join(
+            os.path.dirname(__file__), "fixtures", "mcd_raw.html"
+        )
+        if not os.path.exists(fixture_path):
+            pytest.skip("MCD fixture not available")
+        with open(fixture_path, "r") as f:
+            return f.read()
+
+    def test_mcd_extracts_risk_factors(self, mcd_html):
+        """MCD should extract Risk Factors (ITEM 1A) via styling-based detection."""
+        parser = Parser(mcd_html)
+        pages = parser.get_pages(include_elements=False)
+
+        extractor = SectionExtractor(
+            pages=pages, filing_type="10-K", debug=False, raw_html=parser.raw_html
+        )
+
+        sections = extractor.get_sections()
+        section_items = {s.item for s in sections}
+
+        # MCD uses styled "RISK FACTORS" header without "ITEM 1A" text
+        assert "ITEM 1A" in section_items, "MCD should extract ITEM 1A via styling"
+
+        risk_section = next(s for s in sections if s.item == "ITEM 1A")
+        content = risk_section.markdown()
+
+        # Risk Factors should have substantial content
+        assert len(content) > 5000, "MCD ITEM 1A should have substantial content"
+
+    def test_mcd_extracts_multiple_sections(self, mcd_html):
+        """MCD should extract multiple sections via styling-based detection."""
+        parser = Parser(mcd_html)
+        pages = parser.get_pages(include_elements=False)
+
+        extractor = SectionExtractor(
+            pages=pages, filing_type="10-K", debug=False, raw_html=parser.raw_html
+        )
+
+        sections = extractor.get_sections()
+        section_items = {s.item for s in sections}
+
+        # Should extract multiple key sections
+        assert len(sections) >= 5, "MCD should extract at least 5 sections"
+
+        # Key items that should be detected via styling
+        expected_items = ["ITEM 1", "ITEM 1A", "ITEM 2", "ITEM 8"]
+        for item in expected_items:
+            assert item in section_items, f"MCD should extract {item}"
+
+    def test_mcd_deduplicates_sections(self, mcd_html):
+        """MCD should not have duplicate ITEM entries."""
+        parser = Parser(mcd_html)
+        pages = parser.get_pages(include_elements=False)
+
+        extractor = SectionExtractor(
+            pages=pages, filing_type="10-K", debug=False, raw_html=parser.raw_html
+        )
+
+        sections = extractor.get_sections()
+
+        # Check for duplicates
+        item_counts = {}
+        for s in sections:
+            item_counts[s.item] = item_counts.get(s.item, 0) + 1
+
+        for item, count in item_counts.items():
+            assert count == 1, f"MCD should not have duplicate {item} (found {count})"

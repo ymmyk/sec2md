@@ -650,7 +650,9 @@ class SectionExtractor:
                 confidence = self._compute_styling_confidence(element_style, baseline_style)
 
                 # Filter to high-confidence candidates
-                if confidence >= 0.7:
+                # Threshold lowered from 0.7 to 0.55 to handle filings like MCD
+                # where headers use color+bold but not larger font size
+                if confidence >= 0.55:
                     candidates.append((element, matched_keyword, confidence))
                     self._log(
                         f"Found candidate: '{element_text[:50]}' matched '{matched_keyword}' confidence={confidence:.2f}"
@@ -1090,7 +1092,7 @@ class SectionExtractor:
         Returns: List of Section objects
         """
         from sec2md.models import Section, Page
-        from bs4 import BeautifulSoup
+        from bs4 import BeautifulSoup, Tag
 
         if not self.raw_html:
             self._log("No raw HTML available for styling-based extraction")
@@ -1139,46 +1141,54 @@ class SectionExtractor:
                 item_title = elem_text
 
             # Find the content container (walk up tree if nested in table/div)
+            # Need to find a container that has sibling elements with content
             content_start = element
-            # If element is deeply nested (e.g., in table cell), walk up to find container
-            for _ in range(5):  # Max 5 levels up
-                parent = content_start.find_parent(["div", "table"])
-                if parent and parent.name == "table":
-                    # Tables are often section header containers, use parent div
-                    parent_div = parent.find_parent("div")
-                    if parent_div:
-                        content_start = parent_div
+            # First check if the element itself has enough siblings
+            own_siblings = [
+                s for s in content_start.find_next_siblings() if isinstance(s, Tag)
+            ]
+            if len(own_siblings) < 2:
+                # Walk up to find a container with more siblings
+                for _ in range(10):  # Max 10 levels up to handle deep nesting
+                    if not content_start.parent:
                         break
-                elif parent and parent.name == "div":
-                    # Check if this div seems like a header container (small, has table)
-                    if parent.find("table") and len(parent.get_text(strip=True)) < 200:
+                    parent = content_start.parent
+                    # Stop at body level - use the element itself
+                    if parent.name == "body":
+                        content_start = content_start  # Stay at current level
+                        break
+                    # Check if parent has meaningful sibling content
+                    next_siblings = [
+                        s for s in parent.find_next_siblings() if isinstance(s, Tag)
+                    ]
+                    if len(next_siblings) >= 2:
+                        # Found a container with sibling content elements
                         content_start = parent
                         break
-                    else:
-                        break
-                else:
-                    break
+                    content_start = parent
 
             # Find end boundary (next section or end of document)
             if i + 1 < len(candidates_with_pos):
                 next_element = candidates_with_pos[i + 1][1]
-                # Find next element's content container
+                # Find next element's content container using same logic
                 next_start = next_element
-                for _ in range(5):
-                    parent = next_start.find_parent(["div", "table"])
-                    if parent and parent.name == "table":
-                        parent_div = parent.find_parent("div")
-                        if parent_div:
-                            next_start = parent_div
+                own_sibs = [
+                    s for s in next_start.find_next_siblings() if isinstance(s, Tag)
+                ]
+                if len(own_sibs) < 2:
+                    for _ in range(10):
+                        if not next_start.parent:
                             break
-                    elif parent and parent.name == "div":
-                        if parent.find("table") and len(parent.get_text(strip=True)) < 200:
+                        parent = next_start.parent
+                        if parent.name == "body":
+                            break
+                        next_siblings = [
+                            s for s in parent.find_next_siblings() if isinstance(s, Tag)
+                        ]
+                        if len(next_siblings) >= 2:
                             next_start = parent
                             break
-                        else:
-                            break
-                    else:
-                        break
+                        next_start = parent
 
                 # Extract content between containers
                 content_parts = []
@@ -1232,7 +1242,28 @@ class SectionExtractor:
                 sections.append(section)
                 self._log(f"Extracted {item} ({keyword}): {len(text_content)} chars")
 
-        return sections
+        # Deduplicate: for duplicate ITEMs, keep the largest one
+        # This handles cases where subsection headers match the same ITEM keyword
+        item_sections: dict = {}
+        for section in sections:
+            key = section.item
+            existing = item_sections.get(key)
+            if existing is None:
+                item_sections[key] = section
+            else:
+                # Keep the larger section
+                existing_len = sum(len(p.content) for p in existing.pages)
+                new_len = sum(len(p.content) for p in section.pages)
+                if new_len > existing_len:
+                    self._log(
+                        f"Replacing {key} ({existing_len} chars) with larger version ({new_len} chars)"
+                    )
+                    item_sections[key] = section
+
+        # Return deduplicated sections sorted by DOM position
+        deduped = list(item_sections.values())
+        deduped.sort(key=lambda s: getattr(s, "_dom_position", float("inf")))
+        return deduped
 
     def _extract_sections_from_toc(self) -> List[Any]:
         """
@@ -1615,7 +1646,9 @@ class SectionExtractor:
             sections = self._get_standard_sections()
 
             # Four-tier fallback: pattern → styling → TOC table → TOC anchor
-            if not sections and self.raw_html:
+            # Trigger fallback if no sections found OR if only PART-only sections (no ITEMs)
+            has_items = any(s.item is not None for s in sections)
+            if (not sections or not has_items) and self.raw_html:
                 self._log(
                     "Pattern-based extraction found 0 sections, trying styling-based extraction..."
                 )
