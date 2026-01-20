@@ -33,6 +33,7 @@ def _extract_item_title(match: re.Match) -> str:
     """Extract item title from ITEM_PATTERN match."""
     return (match.group(3) or "").strip()
 
+
 HEADER_FOOTER_RE = re.compile(
     r"^\s*(?:[A-Z][A-Za-z0-9 .,&\-]+)?\s*\|\s*\d{4}\s+Form\s+10-[KQ]\s*\|\s*\d+\s*$"
 )
@@ -1158,9 +1159,7 @@ class SectionExtractor:
                 end_parsed = self._map_toc_pages_to_parsed_pages(end_page)
 
                 if start_parsed is None:
-                    self._log(
-                        f"Could not map display page {start_page} for {item_id}"
-                    )
+                    self._log(f"Could not map display page {start_page} for {item_id}")
                     continue
 
                 # Default end to start if mapping failed
@@ -1206,7 +1205,9 @@ class SectionExtractor:
                             pages=[page_obj],
                         )
                     )
-                    self._log(f"Extracted {item_id}: {len(combined)} chars from {len(page_ranges)} range(s)")
+                    self._log(
+                        f"Extracted {item_id}: {len(combined)} chars from {len(page_ranges)} range(s)"
+                    )
 
         return sections
 
@@ -2007,7 +2008,7 @@ class SectionExtractor:
             # Five-tier fallback: pattern → cross-reference → styling → TOC table → TOC anchor
             # Trigger fallback if no sections found OR if only PART-only sections (no ITEMs)
             has_items = any(s.item is not None for s in sections)
-            if (not sections or not has_items):
+            if not sections or not has_items:
                 self._log(
                     "Pattern-based extraction found 0 sections, trying cross-reference index..."
                 )
@@ -2015,9 +2016,7 @@ class SectionExtractor:
                 # Try cross-reference index first (most explicit/reliable when available)
                 xref_sections = self._extract_sections_from_cross_reference()
                 if xref_sections and len(xref_sections) >= 2:
-                    self._log(
-                        f"Cross-reference extraction found {len(xref_sections)} sections"
-                    )
+                    self._log(f"Cross-reference extraction found {len(xref_sections)} sections")
                     sections = xref_sections
                 elif self.raw_html:
                     # Fall back to styling-based extraction
@@ -2158,7 +2157,10 @@ class SectionExtractor:
                     # Check for inline reference like "See Part I Item 1A"
                     # But NOT section headers like "Part II:\n\nItem 1A" (separated by newlines)
                     # Only skip if Part is on same line (no newline between Part and Item)
-                    if re.search(r"\bPart\s+[IVXLC]+", context, re.IGNORECASE) and "\n" not in context:
+                    if (
+                        re.search(r"\bPart\s+[IVXLC]+", context, re.IGNORECASE)
+                        and "\n" not in context
+                    ):
                         self._log(
                             f"DEBUG: Page {page_num} skipping inline reference at {m.start()}"
                         )
@@ -2222,9 +2224,7 @@ class SectionExtractor:
                 title = _extract_item_title(item_m)
                 current_item_title = self._clean_item_title(title) if title else None
                 if current_part is None and self.filing_type:
-                    inferred = self._infer_part_for_item(
-                        self.filing_type, f"ITEM {item_num}"
-                    )
+                    inferred = self._infer_part_for_item(self.filing_type, f"ITEM {item_num}")
                     if inferred:
                         current_part = inferred
                         self._log(

@@ -91,17 +91,15 @@ class TestNonStandardFormatExtraction:
         pages = parser.get_pages(include_elements=False)
 
         # Create extractor WITHOUT raw_html - cross-reference works from page content
-        extractor = SectionExtractor(
-            pages=pages, filing_type="10-K", debug=True, raw_html=None
-        )
+        extractor = SectionExtractor(pages=pages, filing_type="10-K", debug=True, raw_html=None)
 
         sections = extractor.get_sections()
 
         # Intel has a 10-K Cross-Reference Index that provides page mappings
         # Cross-reference extraction should find multiple sections even without raw_html
-        assert len(sections) >= 10, (
-            f"Intel filing should extract at least 10 sections via cross-reference, got {len(sections)}"
-        )
+        assert (
+            len(sections) >= 10
+        ), f"Intel filing should extract at least 10 sections via cross-reference, got {len(sections)}"
 
         # Check for key sections
         section_items = {s.item for s in sections}
