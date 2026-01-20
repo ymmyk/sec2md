@@ -102,15 +102,23 @@ The section extractor uses **multiple fallback strategies** (most reliable first
 - Handles format variations: "ITEM 1A", "Item 1A.", "ITEM 1A -"
 - See `ITEM_PATTERNS` in `section_extractor.py`
 
-### 2. TOC-Based Extraction (Fallback)
-- Parses Table of Contents anchor links
-- Matches TOC entries to content using fuzzy matching
-- Used for non-standard formats (e.g., Intel filings)
+### 2. Cross-Reference Index Extraction (Fallback)
+- Parses "Form 10-K Cross-Reference Index" tables found in some filings (e.g., Intel)
+- Uses explicit page number mappings from the cross-reference table
+- Handles sub-rows for items with multiple page ranges
+- Works from rendered markdown content (no raw HTML needed)
+- See `_parse_cross_reference_index()` and `_extract_sections_from_cross_reference()` in `section_extractor.py`
 
 ### 3. Styling-Based Extraction (Fallback)
 - Detects headers by font size, weight, color
 - Uses statistical confidence scoring
-- Last resort for unusual formats
+- Requires raw HTML
+
+### 4. TOC-Based Extraction (Fallback)
+- Parses Table of Contents anchor links
+- Matches TOC entries to content using fuzzy matching
+- Used for non-standard formats
+- Requires raw HTML
 
 ### Fuzzy Matching Algorithm
 

@@ -85,20 +85,29 @@ class TestNonStandardFormatExtraction:
             if section.item != "ITEM 6":  # ITEM 6 is often [RESERVED]
                 assert len(content) > 50, f"{section.item} should have some content"
 
-    def test_intel_pattern_extraction_fails(self, intel_html):
-        """Intel filing should fail with pattern-only extraction (no raw_html)."""
+    def test_intel_cross_reference_extraction(self, intel_html):
+        """Intel filing should work with cross-reference index extraction (no raw_html needed)."""
         parser = Parser(intel_html)
         pages = parser.get_pages(include_elements=False)
 
-        # Create extractor WITHOUT raw_html to force pattern-only mode
+        # Create extractor WITHOUT raw_html - cross-reference works from page content
         extractor = SectionExtractor(
-            pages=pages, filing_type="10-K", debug=True, raw_html=None  # No fallback available
+            pages=pages, filing_type="10-K", debug=True, raw_html=None
         )
 
         sections = extractor.get_sections()
 
-        # Should return 0 sections because pattern matching fails on Intel format
-        assert len(sections) == 0, "Intel filing should extract 0 sections without TOC fallback"
+        # Intel has a 10-K Cross-Reference Index that provides page mappings
+        # Cross-reference extraction should find multiple sections even without raw_html
+        assert len(sections) >= 10, (
+            f"Intel filing should extract at least 10 sections via cross-reference, got {len(sections)}"
+        )
+
+        # Check for key sections
+        section_items = {s.item for s in sections}
+        assert "ITEM 1A" in section_items, "Should find Risk Factors"
+        assert "ITEM 7" in section_items, "Should find MD&A"
+        assert "ITEM 8" in section_items, "Should find Financial Statements"
 
 
 class TestTOCExtractionComponents:

@@ -868,6 +868,299 @@ class SectionExtractor:
 
         return None
 
+    # =============================================================================
+    # Cross-Reference Index Extraction (for filings like Intel with explicit page mappings)
+    # =============================================================================
+
+    def _parse_cross_reference_index(self, content: str) -> List[tuple]:
+        """
+        Parse a 10-K Cross-Reference Index table from markdown content.
+
+        The cross-reference index provides explicit page mappings for each SEC item,
+        which is more reliable than TOC anchor links or styling-based detection.
+
+        Format example:
+            | Item 1. | Business: | |
+            | | General development of business | Pages 3 - 4 , 13 |
+            | Item 1A. | Risk Factors | Pages 31 - 46 |
+            | Item 9. | Changes in and Disagreements... | None |
+
+        Returns: List of (item_id, title, page_ranges) tuples where:
+            - item_id: "ITEM 1", "ITEM 1A", etc.
+            - title: Section title
+            - page_ranges: List of (start_page, end_page) tuples, or None if "None"
+        """
+        entries = []
+
+        # Find the cross-reference index section
+        # Look for "Form 10-K Cross-Reference Index" as a standalone header line
+        # (not just a reference within a paragraph)
+        xref_pattern = re.compile(
+            r"^(?:Form\s+)?10-K\s+Cross-Reference\s+Index\s*$",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        xref_match = xref_pattern.search(content)
+
+        if not xref_match:
+            self._log("No cross-reference index found in content")
+            return []
+
+        # Extract the table section after the header
+        xref_start = xref_match.end()
+
+        # Find the end of the cross-reference table (next major section or end of content)
+        # Usually ends at "Signatures" or another major header
+        end_pattern = re.compile(
+            r"^\*{0,4}(?:Signatures|Table of Contents)\*{0,4}\s*$",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        end_match = end_pattern.search(content, xref_start)
+        xref_end = end_match.start() if end_match else len(content)
+
+        xref_section = content[xref_start:xref_end]
+        self._log(f"Found cross-reference section: {len(xref_section)} chars")
+
+        # Parse markdown table rows
+        # Pattern matches: | Item N. | Title | Pages X - Y |
+        item_row_pattern = re.compile(
+            r"^\s*\|\s*Item\s+(\d{1,2}[A-Z]?)\.?\s*\|\s*([^|]*)\|\s*([^|]*)\|?\s*$",
+            re.IGNORECASE,
+        )
+
+        # Pattern for sub-rows (continuation of parent item): | | Sub-title | Pages X |
+        sub_row_pattern = re.compile(
+            r"^\s*\|\s*\|\s*([^|]+)\|\s*([^|]*)\|?\s*$",
+        )
+
+        # Also match PART headers for context
+        part_pattern = re.compile(
+            r"^\s*\|\s*(Part\s+[IVXLC]+)\s*\|",
+            re.IGNORECASE,
+        )
+
+        current_part = None
+        current_item = None
+        current_title = None
+        current_pages: List[tuple] = []
+
+        def flush_item():
+            nonlocal current_item, current_title, current_pages
+            if current_item and current_pages:
+                entries.append((current_item, current_title, current_pages, current_part))
+                self._log(
+                    f"Cross-ref entry: {current_item} | {current_title[:30] if current_title else ''} "
+                    f"| pages={current_pages}"
+                )
+            elif current_item:
+                # Item with no pages (e.g., "None" or proxy reference)
+                entries.append((current_item, current_title, None, current_part))
+                self._log(
+                    f"Cross-ref entry: {current_item} | {current_title[:30] if current_title else ''} "
+                    f"| pages=None"
+                )
+            current_item = None
+            current_title = None
+            current_pages = []
+
+        for line in xref_section.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("| ---"):
+                continue
+
+            # Check for PART header
+            part_match = part_pattern.match(line)
+            if part_match:
+                flush_item()
+                current_part = part_match.group(1).upper()
+                current_part = re.sub(r"\s+", " ", current_part)
+                self._log(f"Cross-ref: Found {current_part}")
+                continue
+
+            # Check for new ITEM row
+            item_match = item_row_pattern.match(line)
+            if item_match:
+                # Flush previous item before starting new one
+                flush_item()
+
+                item_num = item_match.group(1).upper()
+                title = item_match.group(2).strip()
+                pages_str = item_match.group(3).strip()
+
+                current_item = f"ITEM {item_num}"
+
+                # Clean title (remove trailing colons, etc.)
+                title = re.sub(r":?\s*$", "", title)
+                current_title = self._clean_item_title(title)
+
+                # Parse page references if present
+                page_ranges = self._parse_page_references(pages_str)
+                if page_ranges:
+                    current_pages.extend(page_ranges)
+                continue
+
+            # Check for sub-row (belongs to current item)
+            sub_match = sub_row_pattern.match(line)
+            if sub_match and current_item:
+                sub_title = sub_match.group(1).strip()
+                pages_str = sub_match.group(2).strip()
+
+                # Parse page references from sub-row
+                page_ranges = self._parse_page_references(pages_str)
+                if page_ranges:
+                    current_pages.extend(page_ranges)
+                    self._log(
+                        f"Cross-ref sub-row for {current_item}: {sub_title[:30]} | pages={page_ranges}"
+                    )
+
+        # Flush final item
+        flush_item()
+
+        return entries
+
+    def _parse_page_references(self, pages_str: str) -> Optional[List[tuple]]:
+        """
+        Parse page reference strings from cross-reference index.
+
+        Handles formats like:
+            - "Pages 3 - 4 , 13" -> [(3, 4), (13, 13)]
+            - "Page 48" -> [(48, 48)]
+            - "Pages 31 - 46" -> [(31, 46)]
+            - "None" -> None
+            - "(a)" -> None (proxy reference)
+            - "" -> None
+
+        Returns: List of (start_page, end_page) tuples, or None if no pages
+        """
+        pages_str = pages_str.strip()
+
+        # Handle special cases
+        if not pages_str or pages_str.lower() in ("none", "(a)"):
+            return None
+
+        # Remove "Page" or "Pages" prefix
+        pages_str = re.sub(r"^Pages?\s+", "", pages_str, flags=re.IGNORECASE)
+
+        # Split by comma to handle multiple page references
+        page_ranges = []
+        parts = re.split(r"\s*,\s*", pages_str)
+
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+
+            # Check for range pattern: "3 - 4" or "31-46"
+            range_match = re.match(r"(\d+)\s*[-–—]\s*(\d+)", part)
+            if range_match:
+                start = int(range_match.group(1))
+                end = int(range_match.group(2))
+                page_ranges.append((start, end))
+            else:
+                # Single page number
+                single_match = re.match(r"(\d+)", part)
+                if single_match:
+                    page_num = int(single_match.group(1))
+                    page_ranges.append((page_num, page_num))
+
+        return page_ranges if page_ranges else None
+
+    def _extract_sections_from_cross_reference(self) -> List[Any]:
+        """
+        Extract sections using the 10-K Cross-Reference Index.
+
+        This method uses explicit page mappings from the cross-reference index
+        to extract section content. This is more reliable than TOC anchor-based
+        extraction for filings that include this index (like Intel).
+
+        Returns: List of Section objects
+        """
+        from sec2md.models import Section, Page
+
+        # Get full document content to find cross-reference index
+        full_content = "\n\n".join(page.content for page in self.pages)
+
+        # Parse the cross-reference index
+        xref_entries = self._parse_cross_reference_index(full_content)
+
+        if not xref_entries:
+            self._log("No cross-reference index entries found")
+            return []
+
+        self._log(f"Found {len(xref_entries)} cross-reference entries")
+
+        sections = []
+
+        for item_id, title, page_ranges, part in xref_entries:
+            # Skip items with no page references (None, proxy references)
+            if page_ranges is None:
+                self._log(f"Skipping {item_id}: no page references")
+                continue
+
+            # Skip filtered items
+            if self.desired_items and item_id not in self.desired_items:
+                continue
+
+            # Collect content from all referenced pages
+            content_parts = []
+
+            for start_page, end_page in page_ranges:
+                # Map display pages to parsed pages
+                start_parsed = self._map_toc_pages_to_parsed_pages(start_page)
+                end_parsed = self._map_toc_pages_to_parsed_pages(end_page)
+
+                if start_parsed is None:
+                    self._log(
+                        f"Could not map display page {start_page} for {item_id}"
+                    )
+                    continue
+
+                # Default end to start if mapping failed
+                if end_parsed is None:
+                    end_parsed = start_parsed
+
+                self._log(
+                    f"Extracting {item_id} pages {start_page}-{end_page} "
+                    f"(parsed: {start_parsed}-{end_parsed})"
+                )
+
+                # Extract content from page range
+                for page in self.pages:
+                    if start_parsed <= page.number <= end_parsed:
+                        content_parts.append(page.content)
+
+            # Combine content from all page ranges
+            if content_parts:
+                combined = "\n\n".join(content_parts)
+
+                # Apply length limit
+                MAX_SECTION_CHARS = 120000
+                if len(combined) > MAX_SECTION_CHARS:
+                    self._log(
+                        f"Truncating {item_id} from {len(combined)} to {MAX_SECTION_CHARS} chars"
+                    )
+                    combined = combined[:MAX_SECTION_CHARS]
+
+                if len(combined) > 500:
+                    # Use part from cross-reference or infer it
+                    section_part = part
+                    if not section_part and self.filing_type == "10-K":
+                        section_part = self._infer_part_for_item(self.filing_type, item_id)
+
+                    # Create section with a single page containing combined content
+                    page_obj = Page(number=1, content=combined, elements=None)
+
+                    sections.append(
+                        Section(
+                            part=section_part,
+                            item=item_id,
+                            item_title=title if title else None,
+                            pages=[page_obj],
+                        )
+                    )
+                    self._log(f"Extracted {item_id}: {len(combined)} chars from {len(page_ranges)} range(s)")
+
+        return sections
+
     def _extract_sections_from_toc_table(self) -> List[Any]:
         """
         Extract sections using TOC table structure (comprehensive fallback).
@@ -1662,72 +1955,98 @@ class SectionExtractor:
         else:
             sections = self._get_standard_sections()
 
-            # Four-tier fallback: pattern → styling → TOC table → TOC anchor
+            # Five-tier fallback: pattern → cross-reference → styling → TOC table → TOC anchor
             # Trigger fallback if no sections found OR if only PART-only sections (no ITEMs)
             has_items = any(s.item is not None for s in sections)
-            if (not sections or not has_items) and self.raw_html:
+            if (not sections or not has_items):
                 self._log(
-                    "Pattern-based extraction found 0 sections, trying styling-based extraction..."
+                    "Pattern-based extraction found 0 sections, trying cross-reference index..."
                 )
-                styling_sections = self._extract_sections_from_styling()
 
-                # If styling extraction found a reasonable number of sections, use it
-                if styling_sections and len(styling_sections) >= 2:
-                    self._log(f"Styling-based extraction found {len(styling_sections)} sections")
-                    sections = styling_sections
-                else:
-                    # Try TOC extraction (more comprehensive for complex filings)
-                    if styling_sections:
+                # Try cross-reference index first (most explicit/reliable when available)
+                xref_sections = self._extract_sections_from_cross_reference()
+                if xref_sections and len(xref_sections) >= 2:
+                    self._log(
+                        f"Cross-reference extraction found {len(xref_sections)} sections"
+                    )
+                    sections = xref_sections
+                elif self.raw_html:
+                    # Fall back to styling-based extraction
+                    if xref_sections:
                         self._log(
-                            f"Styling-based extraction found only {len(styling_sections)} section(s), "
-                            "trying TOC extraction..."
+                            f"Cross-reference extraction found only {len(xref_sections)} section(s), "
+                            "trying styling-based extraction..."
                         )
                     else:
                         self._log(
-                            "Styling-based extraction found 0 sections, trying TOC table extraction..."
+                            "Cross-reference extraction found 0 sections, "
+                            "trying styling-based extraction..."
                         )
 
-                    toc_sections = self._extract_sections_from_toc_table()
-                    if not toc_sections:
+                    styling_sections = self._extract_sections_from_styling()
+
+                    # If styling extraction found a reasonable number of sections, use it
+                    if styling_sections and len(styling_sections) >= 2:
                         self._log(
-                            "TOC table extraction found 0 sections, trying TOC anchor fallback..."
+                            f"Styling-based extraction found {len(styling_sections)} sections"
                         )
-                        toc_sections = self._extract_sections_from_toc()
-
-                    if toc_sections:
-                        self._log(
-                            f"TOC extraction succeeded: extracted {len(toc_sections)} sections"
-                        )
-                        # Merge styling sections with TOC sections (prioritize TOC but add missing styling)
-                        if styling_sections:
-                            toc_items = {s.item for s in toc_sections}
-                            for styling_sec in styling_sections:
-                                if styling_sec.item not in toc_items:
-                                    self._log(
-                                        f"Adding {styling_sec.item} from styling extraction "
-                                        "(not found in TOC)"
-                                    )
-                                    toc_sections.append(styling_sec)
-
-                        # Sort merged sections by DOM position to maintain document order
-                        # Note: Styling positions are more reliable than TOC anchor positions
-                        # because TOC may have multiple anchors scattered throughout the document
-                        sections = sorted(
-                            toc_sections,
-                            key=lambda s: getattr(s, "_dom_position", float("inf")),
-                        )
-                        # Log positions for debugging
-                        if self.debug:
-                            for s in sections:
-                                pos = getattr(s, "_dom_position", "NO POS")
-                                self._log(f"  {s.item}: position={pos}")
-                        self._log(f"Sorted {len(sections)} sections by document position")
-                    elif styling_sections:
-                        # No TOC sections, use whatever styling found
-                        self._log("TOC extraction failed, using styling sections")
                         sections = styling_sections
                     else:
-                        self._log("All extraction methods found 0 sections")
+                        # Try TOC extraction (more comprehensive for complex filings)
+                        if styling_sections:
+                            self._log(
+                                f"Styling-based extraction found only {len(styling_sections)} section(s), "
+                                "trying TOC extraction..."
+                            )
+                        else:
+                            self._log(
+                                "Styling-based extraction found 0 sections, "
+                                "trying TOC table extraction..."
+                            )
+
+                        toc_sections = self._extract_sections_from_toc_table()
+                        if not toc_sections:
+                            self._log(
+                                "TOC table extraction found 0 sections, "
+                                "trying TOC anchor fallback..."
+                            )
+                            toc_sections = self._extract_sections_from_toc()
+
+                        if toc_sections:
+                            self._log(
+                                f"TOC extraction succeeded: extracted {len(toc_sections)} sections"
+                            )
+                            # Merge styling sections with TOC sections
+                            # (prioritize TOC but add missing styling)
+                            if styling_sections:
+                                toc_items = {s.item for s in toc_sections}
+                                for styling_sec in styling_sections:
+                                    if styling_sec.item not in toc_items:
+                                        self._log(
+                                            f"Adding {styling_sec.item} from styling extraction "
+                                            "(not found in TOC)"
+                                        )
+                                        toc_sections.append(styling_sec)
+
+                            # Sort merged sections by DOM position to maintain document order
+                            # Note: Styling positions are more reliable than TOC anchor positions
+                            # because TOC may have multiple anchors scattered throughout the document
+                            sections = sorted(
+                                toc_sections,
+                                key=lambda s: getattr(s, "_dom_position", float("inf")),
+                            )
+                            # Log positions for debugging
+                            if self.debug:
+                                for s in sections:
+                                    pos = getattr(s, "_dom_position", "NO POS")
+                                    self._log(f"  {s.item}: position={pos}")
+                            self._log(f"Sorted {len(sections)} sections by document position")
+                        elif styling_sections:
+                            # No TOC sections, use whatever styling found
+                            self._log("TOC extraction failed, using styling sections")
+                            sections = styling_sections
+                        else:
+                            self._log("All extraction methods found 0 sections")
 
             return sections
 
@@ -1787,7 +2106,10 @@ class SectionExtractor:
                 if first_idx is None or m.start() < first_idx:
                     context_start = max(0, m.start() - 30)
                     context = joined[context_start : m.start()]
-                    if re.search(r"\bPart\s+[IVXLC]+", context, re.IGNORECASE):
+                    # Check for inline reference like "See Part I Item 1A"
+                    # But NOT section headers like "Part II:\n\nItem 1A" (separated by newlines)
+                    # Only skip if Part is on same line (no newline between Part and Item)
+                    if re.search(r"\bPart\s+[IVXLC]+", context, re.IGNORECASE) and "\n" not in context:
                         self._log(
                             f"DEBUG: Page {page_num} skipping inline reference at {m.start()}"
                         )
