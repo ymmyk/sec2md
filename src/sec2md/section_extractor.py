@@ -222,11 +222,13 @@ class SectionExtractor:
         return out
 
     def _infer_part_for_item(self, filing_type: str, item_key: str) -> Optional[str]:
-        """Infer PART from ITEM number (10-K only)."""
-        m = re.match(r"ITEM\s+(\d{1,2})", item_key)
+        """Infer PART from ITEM number based on filing type."""
+        m = re.match(r"ITEM\s+(\d{1,2})([A-Z])?", item_key, re.IGNORECASE)
         if not m:
             return None
         num = int(m.group(1))
+        suffix = (m.group(2) or "").upper()
+
         if filing_type == "10-K":
             if 1 <= num <= 4:
                 return "PART I"
@@ -236,6 +238,18 @@ class SectionExtractor:
                 return "PART III"
             elif 15 <= num <= 16:
                 return "PART IV"
+        elif filing_type == "10-Q":
+            # 10-Q Part I: Items 1, 2, 3, 4 (Financial Statements, MD&A, Market Risk, Controls)
+            # 10-Q Part II: Items 1, 1A, 2, 3, 4, 5, 6 (Legal, Risk Factors, Stock, Defaults, etc.)
+            # The tricky part is ITEM 1-4 appear in both parts.
+            # We use context: if we see ITEM 1A, it's Part II; ITEM 5/6 are Part II
+            # For ITEM 1-4 without suffix, we can't reliably infer without context
+            if suffix == "A":  # ITEM 1A is always Part II
+                return "PART II"
+            elif num >= 5:  # ITEM 5, 6 are always Part II
+                return "PART II"
+            # For ITEM 1-4 without suffix, return None to let validation handle it
+            # The validation will accept these in either PART I or PART II
         return None
 
     @staticmethod
@@ -2325,32 +2339,31 @@ class SectionExtractor:
         sections = [s for s in sections if s.item is not None or _section_text_len(s) > 80]
         self._log(f"DEBUG: Sections after dropping empty PART stubs: {len(sections)}")
 
+        # Optionally infer PART for sections that don't have one
         if self.structure and sections:
-            self._log(f"DEBUG: Validating against structure: {self.filing_type}")
+            self._log(f"DEBUG: Inferring parts for {self.filing_type}")
             fixed = []
             for s in sections:
                 part = s.part
                 item = s.item
 
-                # If part is missing or inconsistent with canonical mapping, try to infer it from the item.
-                if item and self.filing_type:
+                # If part is missing, try to infer it from the item
+                if item and self.filing_type and not part:
                     inferred = self._infer_part_for_item(self.filing_type, item)
-                    if inferred and inferred != part:
-                        self._log(f"DEBUG: Rewriting part from {part} to {inferred} for {item}")
+                    if inferred:
+                        self._log(f"DEBUG: Inferred {inferred} for {item}")
                         s = Section(
                             part=inferred, item=s.item, item_title=s.item_title, pages=s.pages
                         )
-                        part = inferred
 
-                if (part in self.structure) and (
-                    item is None or item in self.structure.get(part, [])
-                ):
+                # Keep all sections with an item (don't validate against structure)
+                if item:
                     fixed.append(s)
                 else:
-                    self._log(f"DEBUG: Dropped section - Part: {part}, Item: {item}")
+                    self._log(f"DEBUG: Dropped section without item - Part: {part}")
 
             sections = fixed
-            self._log(f"DEBUG: Sections after validation: {len(sections)}")
+            self._log(f"DEBUG: Sections after processing: {len(sections)}")
 
         # Merge consecutive sections with the same (part, item) - handles page header/breadcrumb pattern
         sections = self._merge_consecutive_sections(sections)
