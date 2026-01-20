@@ -141,8 +141,21 @@ class SectionExtractor:
         desired_items: Optional[set] = None,
         debug: bool = False,
         raw_html: Optional[str] = None,
+        use_content_based: bool = False,
     ):
-        """Extract sections from SEC filings."""
+        """Extract sections from SEC filings.
+
+        Args:
+            pages: List of Page objects from Parser
+            filing_type: Type of SEC filing (10-K, 10-Q, 20-F, 8-K)
+            desired_items: Optional set of item numbers to extract (for 8-K)
+            debug: Enable debug logging
+            raw_html: Raw HTML for fallback extraction methods
+            use_content_based: Use the simpler content-based extraction method
+                              instead of the HTML-based approach. The content-based
+                              method works on rendered markdown and is more predictable
+                              but may miss some sections in unusual filings.
+        """
         self.pages = pages
         self.filing_type = filing_type
         self.structure = FILING_STRUCTURES.get(filing_type) if filing_type else None
@@ -150,6 +163,7 @@ class SectionExtractor:
         self.debug = debug
         self._toc_locked = False
         self.raw_html = raw_html  # For TOC-based fallback extraction
+        self.use_content_based = use_content_based
 
     def _log(self, msg: str):
         if self.debug:
@@ -1144,9 +1158,7 @@ class SectionExtractor:
             # Need to find a container that has sibling elements with content
             content_start = element
             # First check if the element itself has enough siblings
-            own_siblings = [
-                s for s in content_start.find_next_siblings() if isinstance(s, Tag)
-            ]
+            own_siblings = [s for s in content_start.find_next_siblings() if isinstance(s, Tag)]
             if len(own_siblings) < 2:
                 # Walk up to find a container with more siblings
                 for _ in range(10):  # Max 10 levels up to handle deep nesting
@@ -1158,9 +1170,7 @@ class SectionExtractor:
                         content_start = content_start  # Stay at current level
                         break
                     # Check if parent has meaningful sibling content
-                    next_siblings = [
-                        s for s in parent.find_next_siblings() if isinstance(s, Tag)
-                    ]
+                    next_siblings = [s for s in parent.find_next_siblings() if isinstance(s, Tag)]
                     if len(next_siblings) >= 2:
                         # Found a container with sibling content elements
                         content_start = parent
@@ -1172,9 +1182,7 @@ class SectionExtractor:
                 next_element = candidates_with_pos[i + 1][1]
                 # Find next element's content container using same logic
                 next_start = next_element
-                own_sibs = [
-                    s for s in next_start.find_next_siblings() if isinstance(s, Tag)
-                ]
+                own_sibs = [s for s in next_start.find_next_siblings() if isinstance(s, Tag)]
                 if len(own_sibs) < 2:
                     for _ in range(10):
                         if not next_start.parent:
@@ -1642,6 +1650,15 @@ class SectionExtractor:
         """Get sections from the filing."""
         if self.filing_type == "8-K":
             return self._get_8k_sections()
+
+        # Use content-based extraction if requested
+        if self.use_content_based:
+            from sec2md.content_section_extractor import ContentBasedSectionExtractor
+
+            extractor = ContentBasedSectionExtractor(filing_type=self.filing_type, debug=self.debug)
+            return extractor.extract_sections(self.pages)
+
+        # Legacy HTML-based extraction with fallbacks
         else:
             sections = self._get_standard_sections()
 

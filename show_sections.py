@@ -51,7 +51,6 @@ from typing import Optional
 
 from sec2md.parser import Parser
 from sec2md.section_extractor import SectionExtractor
-from sec2md.models import Item10K, Item10Q
 
 
 # Standard item titles for 10-K and 10-Q filings
@@ -150,6 +149,11 @@ Examples:
         default=500,
         help="Maximum characters to show in preview (default: 500)",
     )
+    parser.add_argument(
+        "--content-based",
+        action="store_true",
+        help="Use content-based extraction (simpler, works on markdown)",
+    )
 
     args = parser.parse_args()
 
@@ -182,9 +186,14 @@ Examples:
     print(f"Parsed {len(pages)} pages")
 
     # Extract sections
-    print("\nExtracting sections...")
+    method = "content-based" if args.content_based else "HTML-based"
+    print(f"\nExtracting sections ({method})...")
     extractor = SectionExtractor(
-        pages=pages, filing_type=filing_type, debug=args.debug, raw_html=html_content
+        pages=pages,
+        filing_type=filing_type,
+        debug=args.debug,
+        raw_html=html_content,
+        use_content_based=args.content_based,
     )
 
     sections = extractor.get_sections()

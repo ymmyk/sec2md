@@ -297,9 +297,7 @@ class TestMcDonaldsExtraction:
         """Load McDonald's 10-K fixture."""
         import os
 
-        fixture_path = os.path.join(
-            os.path.dirname(__file__), "fixtures", "mcd_raw.html"
-        )
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "mcd_raw.html")
         if not os.path.exists(fixture_path):
             pytest.skip("MCD fixture not available")
         with open(fixture_path, "r") as f:
@@ -364,3 +362,102 @@ class TestMcDonaldsExtraction:
 
         for item, count in item_counts.items():
             assert count == 1, f"MCD should not have duplicate {item} (found {count})"
+
+
+class TestContentBasedExtraction:
+    """Test the content-based section extraction approach."""
+
+    def test_content_based_microsoft(self, microsoft_html):
+        """Content-based extraction should work on Microsoft (standard format)."""
+        parser = Parser(microsoft_html)
+        pages = parser.get_pages(include_elements=False)
+
+        extractor = SectionExtractor(
+            pages=pages,
+            filing_type="10-K",
+            debug=False,
+            raw_html=parser.raw_html,
+            use_content_based=True,
+        )
+
+        sections = extractor.get_sections()
+        section_items = {s.item for s in sections}
+
+        # Should extract key sections
+        assert "ITEM 1" in section_items, "Should extract ITEM 1 (Business)"
+        assert "ITEM 1A" in section_items, "Should extract ITEM 1A (Risk Factors)"
+        assert "ITEM 7" in section_items, "Should extract ITEM 7 (MD&A)"
+        assert "ITEM 8" in section_items, "Should extract ITEM 8 (Financial Statements)"
+
+    def test_content_based_intel(self, intel_html):
+        """Content-based extraction should work on Intel (non-standard format)."""
+        parser = Parser(intel_html)
+        pages = parser.get_pages(include_elements=False)
+
+        extractor = SectionExtractor(
+            pages=pages,
+            filing_type="10-K",
+            debug=False,
+            raw_html=parser.raw_html,
+            use_content_based=True,
+        )
+
+        sections = extractor.get_sections()
+        section_items = {s.item for s in sections}
+
+        # Should extract key sections via structural/TOC detection
+        assert "ITEM 1A" in section_items, "Should extract ITEM 1A (Risk Factors)"
+        assert "ITEM 7" in section_items, "Should extract ITEM 7 (MD&A)"
+
+    def test_content_based_mcd(self):
+        """Content-based extraction should work on MCD (styling-based headers)."""
+        import os
+
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "mcd_raw.html")
+        if not os.path.exists(fixture_path):
+            pytest.skip("MCD fixture not available")
+
+        with open(fixture_path, "r") as f:
+            html = f.read()
+
+        parser = Parser(html)
+        pages = parser.get_pages(include_elements=False)
+
+        extractor = SectionExtractor(
+            pages=pages,
+            filing_type="10-K",
+            debug=False,
+            raw_html=parser.raw_html,
+            use_content_based=True,
+        )
+
+        sections = extractor.get_sections()
+        section_items = {s.item for s in sections}
+
+        # Should extract key sections
+        assert "ITEM 1A" in section_items, "Should extract ITEM 1A (Risk Factors)"
+        assert len(sections) >= 5, f"Should extract multiple sections, got {len(sections)}"
+
+    def test_content_based_part_inference(self, microsoft_html):
+        """Content-based extraction should infer PART from ITEM."""
+        parser = Parser(microsoft_html)
+        pages = parser.get_pages(include_elements=False)
+
+        extractor = SectionExtractor(
+            pages=pages,
+            filing_type="10-K",
+            debug=False,
+            raw_html=parser.raw_html,
+            use_content_based=True,
+        )
+
+        sections = extractor.get_sections()
+
+        # Check PART inference
+        for s in sections:
+            if s.item == "ITEM 1A":
+                assert s.part == "PART I", f"ITEM 1A should be PART I, got {s.part}"
+            elif s.item == "ITEM 7":
+                assert s.part == "PART II", f"ITEM 7 should be PART II, got {s.part}"
+            elif s.item == "ITEM 15":
+                assert s.part == "PART IV", f"ITEM 15 should be PART IV, got {s.part}"
