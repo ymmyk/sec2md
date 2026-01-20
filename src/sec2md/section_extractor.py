@@ -4,12 +4,15 @@ import re
 from typing import List, Optional, Literal, Any
 
 LEAD_WRAP = r"(?:\*\*|__)?\s*(?:</?[^>]+>\s*)*"
+# Allow optional bold/italic markers between ITEM and the number
+# Handles: "Item 1A", "**Item 1A**", "Item **1A**", "**Item** **1A**"
+MID_WRAP = r"(?:\*\*|__|[ ])*"
 
 PART_PATTERN = re.compile(
     rf"^\s*{LEAD_WRAP}(PART\s+[IVXLC]+)\.?(?:\*\*|__)?(?:\s*$|\s+)", re.IGNORECASE | re.MULTILINE
 )
 ITEM_PATTERN = re.compile(
-    rf"^\s*{LEAD_WRAP}(ITEM)\s+(\d{{1,2}}[A-Z]?)\.?\s*(?:[:.\-–—]\s*)?(.*)",
+    rf"^\s*{LEAD_WRAP}(ITEM)\s*{MID_WRAP}(\d{{1,2}}[A-Z]?)\.?\s*(?:[:.\-–—]\s*)?(.*)",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -895,11 +898,21 @@ class SectionExtractor:
         # Find the cross-reference index section
         # Look for "Form 10-K Cross-Reference Index" as a standalone header line
         # (not just a reference within a paragraph)
-        xref_pattern = re.compile(
-            r"^(?:Form\s+)?10-K\s+Cross-Reference\s+Index\s*$",
+        # Handles variations:
+        #   - "Form 10-K Cross-Reference Index" (Intel style - standalone line)
+        #   - "| FORM 10-K CROSS REFERENCE INDEX |  | Page(s) |" (GE style - table row)
+        # Use two patterns to handle both cases
+        xref_pattern_standalone = re.compile(
+            r"^(?:Form\s+)?10-K\s+Cross[- ]Reference\s+Index\s*$",
             re.IGNORECASE | re.MULTILINE,
         )
-        xref_match = xref_pattern.search(content)
+        xref_pattern_table = re.compile(
+            r"^\|\s*(?:Form\s+)?10-K\s+Cross[- ]Reference\s+Index\s*\|",
+            re.IGNORECASE | re.MULTILINE,
+        )
+        xref_match = xref_pattern_standalone.search(content)
+        if not xref_match:
+            xref_match = xref_pattern_table.search(content)
 
         if not xref_match:
             self._log("No cross-reference index found in content")
@@ -1025,7 +1038,9 @@ class SectionExtractor:
             - "Pages 3 - 4 , 13" -> [(3, 4), (13, 13)]
             - "Page 48" -> [(48, 48)]
             - "Pages 31 - 46" -> [(31, 46)]
+            - "4-7, 9-11, 74-75" -> [(4, 7), (9, 11), (74, 75)] (GE style)
             - "None" -> None
+            - "Not applicable" -> None
             - "(a)" -> None (proxy reference)
             - "" -> None
 
@@ -1034,7 +1049,10 @@ class SectionExtractor:
         pages_str = pages_str.strip()
 
         # Handle special cases
-        if not pages_str or pages_str.lower() in ("none", "(a)"):
+        if not pages_str or pages_str.lower() in ("none", "not applicable"):
+            return None
+        # Handle proxy references like "(a)", "(b)", etc.
+        if re.match(r"^\([a-z]\)$", pages_str, re.IGNORECASE):
             return None
 
         # Remove "Page" or "Pages" prefix
@@ -2334,7 +2352,62 @@ class SectionExtractor:
             sections = fixed
             self._log(f"DEBUG: Sections after validation: {len(sections)}")
 
+        # Merge consecutive sections with the same (part, item) - handles page header/breadcrumb pattern
+        sections = self._merge_consecutive_sections(sections)
+
         return sections
+
+    def _merge_consecutive_sections(self, sections: List[Any]) -> List[Any]:
+        """
+        Merge consecutive sections with the same (part, item) combination.
+
+        Some filings repeat the section header on every page as a breadcrumb/header,
+        which creates many small sections with identical (part, item). This method
+        merges them into a single section.
+        """
+        from sec2md.models import Section
+
+        if not sections:
+            return sections
+
+        merged = []
+        current = sections[0]
+
+        for next_section in sections[1:]:
+            # Check if this section has the same (part, item) as current
+            same_part = current.part == next_section.part
+            same_item = current.item == next_section.item
+
+            if same_part and same_item and current.item is not None:
+                # Merge: combine pages from both sections
+                combined_pages = list(current.pages) + list(next_section.pages)
+                # Use the title from whichever has one (prefer non-None)
+                title = current.item_title or next_section.item_title
+                current = Section(
+                    part=current.part,
+                    item=current.item,
+                    item_title=title,
+                    pages=combined_pages,
+                )
+                self._log(
+                    f"DEBUG: Merged consecutive {current.item} sections "
+                    f"(now {len(combined_pages)} pages)"
+                )
+            else:
+                # Different section - save current and start new
+                merged.append(current)
+                current = next_section
+
+        # Don't forget the last section
+        merged.append(current)
+
+        if len(merged) < len(sections):
+            self._log(
+                f"DEBUG: Merged {len(sections)} sections into {len(merged)} "
+                f"(combined {len(sections) - len(merged)} consecutive duplicates)"
+            )
+
+        return merged
 
     def get_section(self, part: str, item: Optional[str] = None):
         """Get a specific section by part and item."""
