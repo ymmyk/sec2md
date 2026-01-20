@@ -11,10 +11,27 @@ MID_WRAP = r"(?:\*\*|__|[ ])*"
 PART_PATTERN = re.compile(
     rf"^\s*{LEAD_WRAP}(PART\s+[IVXLC]+)\.?(?:\*\*|__)?(?:\s*$|\s+)", re.IGNORECASE | re.MULTILINE
 )
+# Match ITEM with optional space in the middle (e.g., "I TEM" from PDF conversion)
+# Also handles "ITEM 1 A" with space before the letter suffix
+# Groups: 1=ITEM/I TEM, 2=number+suffix (e.g., "1A" or "1 A"), 3=title
+# The suffix letter must be followed by a non-letter (period, space+punctuation, etc.)
 ITEM_PATTERN = re.compile(
-    rf"^\s*{LEAD_WRAP}(ITEM)\s*{MID_WRAP}(\d{{1,2}}[A-Z]?)\.?\s*(?:[:.\-–—]\s*)?(.*)",
+    rf"^\s*{LEAD_WRAP}(I\s*TEM)\s*{MID_WRAP}(\d{{1,2}}\s*[A-Z]?(?=\s*[^A-Za-z]|$))\.?\s*(?:[:.\-–—]\s*)?(.*)",
     re.IGNORECASE | re.MULTILINE,
 )
+
+
+def _extract_item_num(match: re.Match) -> str:
+    """Extract full item number (e.g., '1A') from ITEM_PATTERN match."""
+    # Group 2 contains number + optional suffix (e.g., "1A" or "1 A")
+    raw = match.group(2) or ""
+    # Remove any spaces (e.g., "1 A" -> "1A")
+    return raw.replace(" ", "").upper()
+
+
+def _extract_item_title(match: re.Match) -> str:
+    """Extract item title from ITEM_PATTERN match."""
+    return (match.group(3) or "").strip()
 
 HEADER_FOOTER_RE = re.compile(
     r"^\s*(?:[A-Z][A-Za-z0-9 .,&\-]+)?\s*\|\s*\d{4}\s+Form\s+10-[KQ]\s*\|\s*\d+\s*$"
@@ -369,8 +386,8 @@ class SectionExtractor:
         # Try ITEM patterns first (more specific)
         item_match = ITEM_PATTERN.search(text)
         if item_match:
-            item_num = item_match.group(2)
-            return f"ITEM {item_num.upper()}"
+            item_num = _extract_item_num(item_match)
+            return f"ITEM {item_num}"
 
         # Try matching specific item numbers with various formats
         patterns = [
@@ -2147,10 +2164,10 @@ class SectionExtractor:
                         )
                         continue
 
-                    title = (m.group(3) or "").strip()
+                    title = _extract_item_title(m)
                     if not title or ITEM_BREADCRUMB_TITLE_RE.match(title):
                         self._log(
-                            f"DEBUG: Page {page_num} skipping breadcrumb ITEM {m.group(2)} with title '{title}'"
+                            f"DEBUG: Page {page_num} skipping breadcrumb ITEM {_extract_item_num(m)} with title '{title}'"
                         )
                         continue
 
@@ -2158,7 +2175,7 @@ class SectionExtractor:
                     first_idx = m.start()
                     first_kind = "item"
                     self._log(
-                        f"DEBUG: Page {page_num} found ITEM at position {first_idx}: ITEM {m.group(2)}"
+                        f"DEBUG: Page {page_num} found ITEM at position {first_idx}: ITEM {_extract_item_num(m)}"
                     )
                 break
 
@@ -2201,12 +2218,12 @@ class SectionExtractor:
                 current_item = None
                 current_item_title = None
             elif first_kind == "item" and item_m:
-                item_num = item_m.group(2)
-                title = (item_m.group(3) or "").strip()
+                item_num = _extract_item_num(item_m)
+                title = _extract_item_title(item_m)
                 current_item_title = self._clean_item_title(title) if title else None
                 if current_part is None and self.filing_type:
                     inferred = self._infer_part_for_item(
-                        self.filing_type, f"ITEM {item_num.upper()}"
+                        self.filing_type, f"ITEM {item_num}"
                     )
                     if inferred:
                         current_part = inferred
@@ -2229,10 +2246,10 @@ class SectionExtractor:
                 if first_kind == "part" and part_m:
                     item_after = None
                     for m in ITEM_PATTERN.finditer(after):
-                        title_after = (m.group(3) or "").strip()
+                        title_after = _extract_item_title(m)
                         if not title_after or ITEM_BREADCRUMB_TITLE_RE.match(title_after):
                             self._log(
-                                f"DEBUG: Page {page_num} skipping breadcrumb ITEM {m.group(2)} after PART with title '{title_after}'"
+                                f"DEBUG: Page {page_num} skipping breadcrumb ITEM {_extract_item_num(m)} after PART with title '{title_after}'"
                             )
                             continue
                         item_after = m
@@ -2247,8 +2264,8 @@ class SectionExtractor:
                             text_blocks=page.text_blocks,
                             display_page=page.display_page,
                         )
-                        item_num = item_after.group(2)
-                        title = (item_after.group(3) or "").strip()
+                        item_num = _extract_item_num(item_after)
+                        title = _extract_item_title(item_after)
                         current_item_title = self._clean_item_title(title) if title else None
                         _, current_item = self._normalize_section_key(current_part, item_num)
                         self._log(
@@ -2265,10 +2282,10 @@ class SectionExtractor:
                             break
                     for m in ITEM_PATTERN.finditer(tail):
                         if m.start() > 0 and (next_idx is None or m.start() < next_idx):
-                            title_tail = (m.group(3) or "").strip()
+                            title_tail = _extract_item_title(m)
                             if not title_tail or ITEM_BREADCRUMB_TITLE_RE.match(title_tail):
                                 self._log(
-                                    f"DEBUG: Page {page_num} skipping breadcrumb ITEM {m.group(2)} in tail with title '{title_tail}'"
+                                    f"DEBUG: Page {page_num} skipping breadcrumb ITEM {_extract_item_num(m)} in tail with title '{title_tail}'"
                                 )
                                 continue
                             next_kind, next_idx, next_item_m = "item", m.start(), m
@@ -2297,12 +2314,12 @@ class SectionExtractor:
                             f"DEBUG: Page {page_num} - intra-page PART transition to {current_part}"
                         )
                     elif next_kind == "item" and next_item_m:
-                        item_num = next_item_m.group(2)
-                        title = (next_item_m.group(3) or "").strip()
+                        item_num = _extract_item_num(next_item_m)
+                        title = _extract_item_title(next_item_m)
                         current_item_title = self._clean_item_title(title) if title else None
                         if current_part is None and self.filing_type:
                             inferred = self._infer_part_for_item(
-                                self.filing_type, f"ITEM {item_num.upper()}"
+                                self.filing_type, f"ITEM {item_num}"
                             )
                             if inferred:
                                 current_part = inferred
