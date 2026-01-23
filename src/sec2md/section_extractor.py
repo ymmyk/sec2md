@@ -806,7 +806,8 @@ class SectionExtractor:
                 continue
 
             # Check if this table looks like a TOC
-            table_text = table.get_text()
+            # Use separator to ensure word boundaries work across cell edges
+            table_text = table.get_text(separator=" ")
             item_count = len(re.findall(r"\bITEM\s+\d{1,2}[A-Z]?\b", table_text, re.IGNORECASE))
 
             if item_count < 3:
@@ -843,18 +844,32 @@ class SectionExtractor:
                         except ValueError:
                             pass
 
-                # Extract title (text after ITEM number, before page number)
-                # Usually: "Item 1." or "Item 1" followed by title
+                # Extract title - handle two TOC formats:
+                # Format 1: "ITEM 1. Business Description" (title after ITEM)
+                # Format 2: "MANAGEMENT'S DISCUSSION... | 3 | Part I, Item 2" (title in first cell)
+                title = ""
+
+                # First, try to extract title from text after ITEM number
                 title_match = re.search(
                     rf"\bITEM\s+{re.escape(item_num)}\.?\s*[:.\-–—]?\s*(.+?)(?:\s+\d{{1,4}}\s*$|\s*$)",
                     row_text,
                     re.IGNORECASE | re.DOTALL,
                 )
-                title = title_match.group(1).strip() if title_match else ""
-                # Clean up title - remove page number patterns
-                title = re.sub(r"\s+\d{1,4}\s*$", "", title)
-                title = re.sub(r"Pages?\s+\d+[-,\s\d]*$", "", title, flags=re.IGNORECASE)
-                title = self._clean_item_title(title)
+                if title_match:
+                    title = title_match.group(1).strip()
+                    # Clean up title - remove page number patterns
+                    title = re.sub(r"\s+\d{1,4}\s*$", "", title)
+                    title = re.sub(r"Pages?\s+\d+[-,\s\d]*$", "", title, flags=re.IGNORECASE)
+                    title = self._clean_item_title(title)
+
+                # If no title found after ITEM, check if ITEM is in a different cell
+                # and use the first cell as the title (Format 2)
+                if not title and len(cells) >= 2:
+                    first_cell_text = cells[0].get_text().strip()
+                    # Check if the ITEM pattern is NOT in the first cell
+                    if not re.search(r"\bITEM\s+\d", first_cell_text, re.IGNORECASE):
+                        # First cell likely contains the title
+                        title = self._clean_item_title(first_cell_text)
 
                 # Extract anchor link (look for <a href="#...">)
                 anchor_href = None
