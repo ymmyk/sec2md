@@ -1,6 +1,6 @@
 """Section extraction utilities for SEC filings."""
 
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 from sec2md.models import (
     Page,
     Section,
@@ -14,17 +14,25 @@ from sec2md.section_extractor import SectionExtractor
 
 
 def extract_sections(
-    pages: List[Page], filing_type: FilingType, debug: bool = False, raw_html: Optional[str] = None
+    pages: List[Page],
+    filing_type: Optional[FilingType] = None,
+    debug: bool = False,
+    raw_html: Optional[str] = None,
+    mode: Literal["mapped", "raw"] = "mapped",
 ) -> List[Section]:
     """
     Extract sections from filing pages.
 
     Args:
         pages: List of Page objects from convert_to_markdown(return_pages=True)
-        filing_type: Type of filing ("10-K" or "10-Q")
+        filing_type: Type of filing ("10-K" or "10-Q"). Required for "mapped" mode,
+                     optional for "raw" mode.
         debug: Enable debug logging
         raw_html: Optional raw HTML content for TOC-based extraction fallback
                   (automatically passed when using parse_filing with return_raw_html=True)
+        mode: "mapped" (default) maps sections to canonical SEC items (PART/ITEM).
+              "raw" splits on all detected headings (bold lines, ## headings)
+              without mapping to SEC structure.
 
     Returns:
         List of Section objects, each containing pages for that section
@@ -34,9 +42,12 @@ def extract_sections(
         >>> sections = sec2md.extract_sections(pages, filing_type="10-K")
         >>> for section in sections:
         ...     print(f"{section.item}: {section.item_title}")
+
+        >>> # Raw mode — no SEC mapping, just heading detection
+        >>> sections = sec2md.extract_sections(pages, mode="raw")
     """
     extractor = SectionExtractor(
-        pages=pages, filing_type=filing_type, debug=debug, raw_html=raw_html
+        pages=pages, filing_type=filing_type, debug=debug, raw_html=raw_html, mode=mode
     )
 
     # SectionExtractor now returns Section objects directly

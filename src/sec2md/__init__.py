@@ -7,6 +7,7 @@ from sec2md.chunking import chunk_pages, chunk_section, merge_text_blocks, chunk
 from sec2md.models import (
     Page,
     Section,
+    SubSection,
     Item10K,
     Item10Q,
     Item8K,
@@ -33,6 +34,7 @@ __all__ = [
     "chunk_text_block",
     "Page",
     "Section",
+    "SubSection",
     "Element",
     "TextBlock",
     "Exhibit",

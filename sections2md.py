@@ -46,6 +46,17 @@ def main():
         help="Filing type (10-K, 10-Q, 8-K, 20-F). Auto-detected if not provided.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser.add_argument(
+        "--mode",
+        choices=["mapped", "raw"],
+        default="mapped",
+        help="Extraction mode: 'mapped' (default) maps to SEC items, 'raw' splits on all headings",
+    )
+    parser.add_argument(
+        "--detailed",
+        action="store_true",
+        help="Use markdown_detailed() to include ### subsection headings within mapped sections",
+    )
 
     args = parser.parse_args()
 
@@ -93,7 +104,11 @@ def main():
         # Extract sections
         print("Extracting sections...")
         extractor = SectionExtractor(
-            pages=pages, filing_type=filing_type, debug=args.debug, raw_html=html_content
+            pages=pages,
+            filing_type=filing_type,
+            debug=args.debug,
+            raw_html=html_content,
+            mode=args.mode,
         )
         sections = extractor.get_sections()
         print(f"Found {len(sections)} sections")
@@ -105,8 +120,8 @@ def main():
         print(f"Writing sections to: {output_path}")
         with open(output_path, "w", encoding="utf-8") as f:
             for i, section in enumerate(sections):
-                # Get markdown with header
-                section_md = section.markdown()
+                # Get markdown with header (detailed includes ### subsections)
+                section_md = section.markdown_detailed() if args.detailed else section.markdown()
                 f.write(section_md)
 
                 # Add separator between sections (except after last one)

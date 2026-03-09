@@ -370,6 +370,27 @@ class Page(BaseModel):
         return f"Page(number={self.number}{display_info}, tokens={self.tokens}{elem_info}{tb_info}, preview='{preview}...')"
 
 
+class SubSection(BaseModel):
+    """A heading-detected subsection within a mapped Section."""
+
+    title: Optional[str] = Field(None, description="Subsection heading text (None for catch-all)")
+    content: str = Field(description="Subsection content")
+
+    @computed_field
+    @property
+    def tokens(self) -> int:
+        return _count_tokens(self.content)
+
+    def markdown(self) -> str:
+        if self.title:
+            return f"### {self.title}\n\n{self.content}"
+        return self.content
+
+    def __repr__(self) -> str:
+        title_str = self.title or "(catch-all)"
+        return f"SubSection(title='{title_str}', tokens={self.tokens})"
+
+
 class Section(BaseModel):
     """Represents a filing section (e.g., ITEM 1A - Risk Factors)."""
 
@@ -378,6 +399,9 @@ class Section(BaseModel):
     item_title: Optional[str] = Field(None, description="Item title")
     pages: List[Page] = Field(default_factory=list, description="Pages in this section")
     exhibits: Optional[List[Exhibit]] = Field(None, description="8-K exhibits (Item 9.01 only)")
+    subsections: Optional[List[SubSection]] = Field(
+        None, description="Heading-detected subsections within this section"
+    )
 
     model_config = {"frozen": False, "arbitrary_types_allowed": True}
 
@@ -437,6 +461,38 @@ class Section(BaseModel):
         content = "\n\n".join(p.content for p in self.pages)
 
         return f"{heading_level} {header_text}\n\n{content}"
+
+    def markdown_detailed(self) -> str:
+        """Get section content with ## section header and ### subsection headings.
+
+        Like markdown(), but renders subsections as ### headings within the section.
+        Falls back to markdown() if no subsections are populated.
+        """
+        if not self.subsections:
+            return self.markdown()
+
+        # Build section header (same logic as markdown())
+        heading_parts = []
+        if self.part:
+            heading_parts.append(self.part)
+        if self.item:
+            heading_parts.append(self.item)
+        if self.item_title:
+            heading_parts.append(self.item_title)
+
+        parts = []
+
+        if heading_parts:
+            if self.item and any(c.isalpha() for c in self.item.replace("ITEM", "").strip()):
+                heading_level = "###"
+            else:
+                heading_level = "##"
+            parts.append(f"{heading_level} {' '.join(heading_parts)}")
+
+        for sub in self.subsections:
+            parts.append(sub.markdown())
+
+        return "\n\n".join(parts)
 
     def preview(self) -> None:
         """

@@ -163,6 +163,7 @@ class SectionExtractor:
         debug: bool = False,
         raw_html: Optional[str] = None,
         use_content_based: bool = False,
+        mode: Literal["mapped", "raw"] = "mapped",
     ):
         """Extract sections from SEC filings.
 
@@ -176,6 +177,9 @@ class SectionExtractor:
                               instead of the HTML-based approach. The content-based
                               method works on rendered markdown and is more predictable
                               but may miss some sections in unusual filings.
+            mode: "mapped" (default) maps sections to canonical SEC items (PART/ITEM).
+                  "raw" splits on all detected headings (bold lines, ## headings)
+                  without mapping to SEC structure.
         """
         self.pages = pages
         self.filing_type = filing_type
@@ -185,6 +189,7 @@ class SectionExtractor:
         self._toc_locked = False
         self.raw_html = raw_html  # For TOC-based fallback extraction
         self.use_content_based = use_content_based
+        self.mode = mode
 
     def _log(self, msg: str):
         if self.debug:
@@ -2006,15 +2011,22 @@ class SectionExtractor:
 
     def get_sections(self) -> List[Any]:
         """Get sections from the filing."""
+        if self.mode == "raw":
+            return self._get_raw_sections()
+
         if self.filing_type == "8-K":
-            return self._get_8k_sections()
+            sections = self._get_8k_sections()
+            self._populate_subsections(sections)
+            return sections
 
         # Use content-based extraction if requested
         if self.use_content_based:
             from sec2md.content_section_extractor import ContentBasedSectionExtractor
 
             extractor = ContentBasedSectionExtractor(filing_type=self.filing_type, debug=self.debug)
-            return extractor.extract_sections(self.pages)
+            sections = extractor.extract_sections(self.pages)
+            self._populate_subsections(sections)
+            return sections
 
         # Legacy HTML-based extraction with fallbacks
         else:
@@ -2111,7 +2123,215 @@ class SectionExtractor:
                         else:
                             self._log("All extraction methods found 0 sections")
 
+            self._populate_subsections(sections)
             return sections
+
+    def _populate_subsections(self, sections: List[Any]) -> None:
+        """Populate subsections on each Section by detecting headings in original page content.
+
+        The mapped extraction strips bold markers via _clean_lines(), so we scan the
+        original parser pages to find heading texts, then split the cleaned section
+        content at lines matching those headings (with bold stripped).
+        """
+        from sec2md.models import SubSection
+
+        # Build lookup from page number to original (pre-clean) page content
+        original_content = {p.number: p.content for p in self.pages}
+
+        for section in sections:
+            # Step 1: Find all headings from original pages that belong to this section
+            # Each heading text (bold-stripped) will appear as a plain line in the cleaned content
+            # Skip headings that are the section's own ITEM/PART header
+            heading_texts = []
+            for page in section.pages:
+                orig = original_content.get(page.number, "")
+                for line in orig.split("\n"):
+                    heading = self._detect_heading(line.strip())
+                    if heading is not None:
+                        # Skip if this is the section's own ITEM header
+                        if section.item and ITEM_PATTERN.search(heading):
+                            continue
+                        # Skip if this is a PART header (loose match for mangled text like "PAR T II")
+                        if PART_PATTERN.search(heading) or re.search(
+                            r"^PAR\s*T\s+[IVXLC]+\s*$", heading, re.IGNORECASE
+                        ):
+                            continue
+                        heading_texts.append(heading)
+
+            if not heading_texts:
+                section.subsections = [SubSection(title=None, content=section.content)]
+                self._log(
+                    f"Section {section.item or section.item_title}: 1 subsections (catch-all)"
+                )
+                continue
+
+            # Step 2: Split section content at lines that match heading texts
+            # The cleaned content has bold stripped, so "**BALANCE SHEETS**" becomes
+            # "BALANCE SHEETS" — which matches the heading text from _detect_heading
+            heading_set = set(heading_texts)
+            content_lines = section.content.split("\n")
+
+            subsections: List[SubSection] = []
+            current_title: Optional[str] = None
+            current_lines: List[str] = []
+
+            for line in content_lines:
+                stripped = line.strip()
+                if stripped in heading_set:
+                    # Flush previous subsection
+                    text = "\n".join(current_lines).strip()
+                    if text or current_title is not None:
+                        subsections.append(SubSection(title=current_title, content=text))
+                    current_lines = []
+                    current_title = stripped
+                    # Remove from set to handle duplicate text correctly (use first match)
+                    # Actually keep it — same heading text could appear on different pages
+                else:
+                    current_lines.append(line)
+
+            # Flush final
+            text = "\n".join(current_lines).strip()
+            if text or current_title is not None:
+                subsections.append(SubSection(title=current_title, content=text))
+
+            # Drop leading catch-all if it's just the section's own ITEM header line
+            if (
+                len(subsections) > 1
+                and subsections[0].title is None
+                and section.item
+                and ITEM_PATTERN.search(subsections[0].content.strip())
+                and len(subsections[0].content.strip().split("\n")) <= 2
+            ):
+                subsections = subsections[1:]
+
+            if not subsections:
+                section.subsections = [SubSection(title=None, content=section.content)]
+            else:
+                section.subsections = subsections
+
+            self._log(
+                f"Section {section.item or section.item_title}: "
+                f"{len(section.subsections)} subsections"
+            )
+
+    # =============================================================================
+    # Raw heading-based extraction (no SEC item mapping)
+    # =============================================================================
+
+    # Matches lines that are entirely bold: **text** or ***text***
+    # Also handles fragmented bold like **ITEM 1.** **B USINESS**
+    _BOLD_LINE_RE = re.compile(
+        r"^\s*(\*{2,3})(.+?)(\*{2,3})"  # opening bold
+        r"(?:\s*(\*{2,3})(.+?)(\*{2,3}))*"  # optional additional bold fragments
+        r"\s*$"
+    )
+
+    def _get_raw_sections(self) -> List[Any]:
+        """Extract sections by splitting on all detected headings.
+
+        Detects bold-only lines and ## markdown headings as section boundaries.
+        Returns Section objects with item_title set to the heading text,
+        part=None, item=None.
+        """
+        from sec2md.models import Section, Page
+
+        sections: List[Any] = []
+        current_title: Optional[str] = None
+        current_pages: List[Page] = []
+        current_page_lines: List[str] = []
+        current_page_ref: Optional[Any] = None  # reference to source page for metadata
+
+        def flush_page_lines():
+            nonlocal current_page_lines, current_page_ref
+            if current_page_lines and current_page_ref is not None:
+                content = "\n".join(current_page_lines)
+                if content.strip():
+                    current_pages.append(
+                        Page(
+                            number=current_page_ref.number,
+                            content=content,
+                            elements=current_page_ref.elements,
+                            text_blocks=current_page_ref.text_blocks,
+                            display_page=current_page_ref.display_page,
+                        )
+                    )
+            current_page_lines = []
+
+        def flush_section():
+            nonlocal sections, current_title, current_pages
+            flush_page_lines()
+            if current_pages:
+                sections.append(
+                    Section(
+                        part=None,
+                        item=None,
+                        item_title=current_title,
+                        pages=current_pages,
+                    )
+                )
+                current_pages = []
+
+        for page in self.pages:
+            lines = page.content.split("\n")
+
+            for line in lines:
+                stripped = line.strip()
+                heading = self._detect_heading(stripped)
+
+                if heading is not None:
+                    # Start a new section
+                    flush_section()
+                    current_title = heading
+                    current_page_ref = page
+                    self._log(f"Raw heading on page {page.number}: {heading}")
+                else:
+                    if current_page_ref is not None and current_page_ref.number != page.number:
+                        # Page boundary within a section — flush accumulated lines
+                        flush_page_lines()
+                        current_page_ref = page
+                    elif current_page_ref is None:
+                        current_page_ref = page
+                    current_page_lines.append(line)
+
+        # Flush final section
+        flush_section()
+
+        self._log(f"Raw mode: found {len(sections)} sections")
+        return sections
+
+    def _detect_heading(self, line: str) -> Optional[str]:
+        """Detect if a line is a heading. Returns cleaned heading text or None."""
+        if not line:
+            return None
+
+        # Markdown ## headings
+        if line.startswith("## "):
+            return line[3:].strip()
+
+        # Bold-only lines: **text** or ***text*** (possibly fragmented)
+        # Must start with ** or *** and end with ** or ***
+        if not (line.startswith("**") or line.startswith("***")):
+            return None
+
+        # Strip all bold/italic markers to get the text
+        text = re.sub(r"\*{1,3}", "", line).strip()
+
+        # Too long for a heading — likely a bold paragraph
+        if len(text) > 200:
+            return None
+
+        # Too short — likely a stray marker
+        if len(text) < 2:
+            return None
+
+        # Check the line is fully wrapped in bold markers (not just starts with bold)
+        # Remove all bold fragments and whitespace — nothing should remain
+        remainder = re.sub(r"\*{2,3}[^*]+\*{2,3}", "", line).strip()
+        if remainder:
+            # Has non-bold text mixed in — not a heading
+            return None
+
+        return text
 
     def _get_standard_sections(self) -> List[Any]:
         """Extract 10-K/10-Q/20-F sections."""

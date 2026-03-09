@@ -154,6 +154,11 @@ Examples:
         action="store_true",
         help="Use content-based extraction (simpler, works on markdown)",
     )
+    parser.add_argument(
+        "--subsections",
+        action="store_true",
+        help="Show subsections within each mapped section",
+    )
 
     args = parser.parse_args()
 
@@ -221,6 +226,17 @@ Examples:
                 print(f"     - {exhibit.exhibit_no}: {exhibit.description[:80]}")
             if len(section.exhibits) > 3:
                 print(f"     ... and {len(section.exhibits) - 3} more")
+
+        if args.subsections and section.subsections:
+            n = len(section.subsections)
+            is_catch_all = n == 1 and section.subsections[0].title is None
+            if is_catch_all:
+                print(f"   Subsections: (catch-all, {section.subsections[0].tokens:,} tokens)")
+            else:
+                print(f"   Subsections: {n}")
+                for j, sub in enumerate(section.subsections, 1):
+                    title = sub.title or "(catch-all)"
+                    print(f"     {j}. {title} ({sub.tokens:,} tokens)")
 
         if args.show_content:
             content = section.markdown()

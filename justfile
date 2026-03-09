@@ -42,13 +42,25 @@ check: lint format-check
 html2md file output="":
     python html2md.py {{file}} {{ if output != "" { "-o " + output } else { "" } }}
 
-# Convert HTML to markdown with section extraction
+# Convert HTML to markdown with section extraction (mapped to SEC items)
 sections2md file output="":
     python sections2md.py {{file}} {{ if output != "" { "-o " + output } else { "" } }}
+
+# Convert HTML to markdown with raw heading detection (no SEC item mapping)
+sections2md-raw file output="":
+    python sections2md.py {{file}} --mode raw {{ if output != "" { "-o " + output } else { "" } }}
+
+# Convert HTML to markdown with mapped sections + ### subsection headings
+sections2md-detailed file output="":
+    python sections2md.py {{file}} --detailed {{ if output != "" { "-o " + output } else { "" } }}
 
 # Show section metadata for a filing
 show-sections file *args="":
     python show_sections.py {{file}} {{args}}
+
+# Show sections with subsection breakdown
+show-sections-subsections file *args="":
+    python show_sections.py {{file}} --subsections {{args}}
 
 # Show sections with debug info and content
 show-sections-debug file:
