@@ -36,7 +36,7 @@ class TextBlockInfo:
 class Parser:
     """Document parser with support for regular tables and pseudo-tables."""
 
-    def __init__(self, content: str):
+    def __init__(self, content: str, *, annotate_styled_headings: bool = False):
         self.soup = BeautifulSoup(content, "lxml")
         self.includes_table = False
         self.pages: Dict[int, List[str]] = defaultdict(list)
@@ -56,6 +56,9 @@ class Parser:
 
         # Store raw HTML for TOC-based section extraction fallback
         self.raw_html = content
+
+        # Post-process: annotate full-line bold with ## [bold, Xpt] prefix
+        self._annotate_headings = annotate_styled_headings
 
     @staticmethod
     def _is_text_block_tag(el: Tag) -> bool:
@@ -138,6 +141,336 @@ class Parser:
         if not isinstance(el, Tag):
             return False
         return el.name in {"h1", "h2", "h3", "h4", "h5", "h6"}
+
+    # ── Styled heading promotion ──────────────────────────────────────────
+
+    # ── Styled heading annotation ───────────────────────────────────────
+
+    @staticmethod
+    def _parse_color_to_hex(color_str: str) -> Optional[str]:
+        """Convert CSS color to hex format."""
+        color_str = color_str.strip().lower()
+        if color_str.startswith("#"):
+            return color_str.upper()
+        rgb_match = re.match(r"rgb\((\d+),\s*(\d+),\s*(\d+)\)", color_str)
+        if rgb_match:
+            r, g, b = map(int, rgb_match.groups())
+            return f"#{r:02X}{g:02X}{b:02X}"
+        named = {
+            "black": "#000000",
+            "navy": "#000080",
+            "blue": "#0000FF",
+            "darkblue": "#00008B",
+            "white": "#FFFFFF",
+            "red": "#FF0000",
+            "green": "#008000",
+            "gray": "#808080",
+        }
+        return named.get(color_str)
+
+    @staticmethod
+    def _color_distance(hex1: str, hex2: str) -> float:
+        """Euclidean RGB distance, normalized 0-1."""
+        try:
+            r1, g1, b1 = int(hex1[1:3], 16), int(hex1[3:5], 16), int(hex1[5:7], 16)
+            r2, g2, b2 = int(hex2[1:3], 16), int(hex2[3:5], 16), int(hex2[5:7], 16)
+            return min(((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2) ** 0.5 / 441.67, 1.0)
+        except (ValueError, IndexError):
+            return 0.0
+
+    @staticmethod
+    def _extract_style_props(el: Tag) -> dict:
+        """Extract styling properties from an element (font-weight, size, color, bg, family)."""
+        style = el.get("style", "")
+        if not style and el.name not in ("b", "strong"):
+            return {}
+
+        props: dict = {}
+
+        # font-weight
+        m = re.search(r"font-weight:\s*(\d+|bold|normal)", style, re.I)
+        if m:
+            v = m.group(1).lower()
+            props["weight"] = 700 if v == "bold" else (400 if v == "normal" else int(v))
+        elif el.name in ("b", "strong") or el.find_parent(["b", "strong"]):
+            props["weight"] = 700
+
+        # font-size
+        m = re.search(r"font-size:\s*([\d.]+)(pt|px|em)?", style, re.I)
+        if m:
+            val = float(m.group(1))
+            unit = (m.group(2) or "pt").lower()
+            if unit == "px":
+                val *= 0.75
+            elif unit == "em":
+                val *= 12
+            props["size_pt"] = val
+
+        # color
+        m = re.search(r"(?<![a-z-])color:\s*([#\w()]+(?:,\s*\d+\s*)*\)?)", style, re.I)
+        if m:
+            c = m.group(1).strip()
+            if "rgb" in c.lower():
+                c = re.sub(r"\s*,\s*", ",", c)
+            h = Parser._parse_color_to_hex(c)
+            if h:
+                props["color_hex"] = h
+
+        # background-color (element or parent td/th)
+        m = re.search(r"background-color:\s*([#\w()]+(?:,\s*\d+\s*)*\)?)", style, re.I)
+        if m:
+            c = m.group(1).strip()
+            if "rgb" in c.lower():
+                c = re.sub(r"\s*,\s*", ",", c)
+            h = Parser._parse_color_to_hex(c)
+            if h:
+                props["bg_color_hex"] = h
+        else:
+            parent_cell = el.find_parent(["td", "th"])
+            if parent_cell:
+                ps = parent_cell.get("style", "")
+                m2 = re.search(r"background-color:\s*([#\w()]+(?:,\s*\d+\s*)*\)?)", ps, re.I)
+                if m2:
+                    c = m2.group(1).strip()
+                    if "rgb" in c.lower():
+                        c = re.sub(r"\s*,\s*", ",", c)
+                    h = Parser._parse_color_to_hex(c)
+                    if h:
+                        props["bg_color_hex"] = h
+
+        # font-family
+        m = re.search(r"font-family:\s*([^;]+)", style, re.I)
+        if m:
+            props["font_family"] = m.group(1).strip().strip("\"'").lower()
+
+        return props
+
+    def _scan_styled_headings(self) -> Dict[str, str]:
+        """
+        Pre-scan the HTML soup for visually distinct short text elements.
+
+        Uses the same confidence scoring approach as section_extractor:
+        bold, font-size, color, background-color, font-family.
+
+        Returns: dict mapping normalized_text → style descriptor string
+                 e.g. "ITEM 1. BUSINESS" → "bold, 12pt, color:#003399"
+        """
+        from collections import Counter
+
+        soup = self.soup
+
+        # Build baseline from body <p>/<span> tags (most common styles)
+        baseline_weights: list[int] = []
+        baseline_sizes: list[float] = []
+        baseline_colors: list[str] = []
+        baseline_families: list[str] = []
+
+        for tag_name in ["p", "span"]:
+            for el in soup.find_all(tag_name, limit=200):
+                if not isinstance(el, Tag):
+                    continue
+                props = self._extract_style_props(el)
+                if "weight" in props:
+                    baseline_weights.append(props["weight"])
+                if "size_pt" in props:
+                    baseline_sizes.append(props["size_pt"])
+                if "color_hex" in props:
+                    baseline_colors.append(props["color_hex"])
+                if "font_family" in props:
+                    baseline_families.append(props["font_family"])
+
+        baseline = {
+            "weight": Counter(baseline_weights).most_common(1)[0][0] if baseline_weights else 400,
+            "size_pt": (
+                Counter(round(s, 1) for s in baseline_sizes).most_common(1)[0][0]
+                if baseline_sizes
+                else 11.0
+            ),
+            "color_hex": (
+                Counter(baseline_colors).most_common(1)[0][0] if baseline_colors else "#000000"
+            ),
+            "font_family": (
+                Counter(baseline_families).most_common(1)[0][0] if baseline_families else None
+            ),
+        }
+
+        # Scan all potential heading elements
+        heading_map: Dict[str, str] = {}  # normalized_text → descriptor
+
+        for tag_name in [
+            "span",
+            "div",
+            "p",
+            "b",
+            "strong",
+            "td",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+        ]:
+            for el in soup.find_all(tag_name):
+                if not isinstance(el, Tag):
+                    continue
+
+                text = el.get_text(separator=" ", strip=True)
+                if not text or len(text) > 200 or len(text) < 2:
+                    continue
+                if len(text.split()) > 30:
+                    continue
+
+                # Get props from element; also check children for inherited styling
+                props = self._extract_style_props(el)
+                for child in el.find_all(["span", "b", "strong"]):
+                    if not isinstance(child, Tag):
+                        continue
+                    cprops = self._extract_style_props(child)
+                    # Merge: take most distinct values
+                    if cprops.get("weight", 0) > props.get("weight", 0):
+                        props["weight"] = cprops["weight"]
+                    if cprops.get("size_pt", 0) > props.get("size_pt", 0):
+                        props["size_pt"] = cprops["size_pt"]
+                    if "color_hex" in cprops and "color_hex" not in props:
+                        props["color_hex"] = cprops["color_hex"]
+                    if "bg_color_hex" in cprops and "bg_color_hex" not in props:
+                        props["bg_color_hex"] = cprops["bg_color_hex"]
+
+                # Walk ancestors for inherited size if not found
+                if "size_pt" not in props:
+                    parent = el.parent
+                    for _ in range(10):
+                        if parent is None or not isinstance(parent, Tag):
+                            break
+                        pp = self._extract_style_props(parent)
+                        if "size_pt" in pp:
+                            props["size_pt"] = pp["size_pt"]
+                            break
+                        parent = parent.parent
+
+                # Compute confidence score (same logic as section_extractor)
+                confidence = 0.0
+
+                elem_weight = props.get("weight", 400)
+                if elem_weight >= 700 and baseline["weight"] < 700:
+                    confidence += 0.3
+
+                elem_size = props.get("size_pt", 0)
+                base_size = baseline["size_pt"]
+                if elem_size > 0:
+                    diff = elem_size - base_size
+                    if diff >= 6:
+                        confidence += 0.4
+                    elif diff >= 3:
+                        confidence += 0.3
+                    elif diff >= 2:
+                        confidence += 0.2
+
+                elem_color = props.get("color_hex")
+                if elem_color and baseline["color_hex"]:
+                    if self._color_distance(elem_color, baseline["color_hex"]) >= 0.2:
+                        confidence += 0.3
+
+                elem_bg = props.get("bg_color_hex")
+                if elem_bg and elem_bg.upper() not in ("#FFFFFF", "#FFF"):
+                    confidence += 0.4
+
+                elem_family = props.get("font_family")
+                if (
+                    elem_family
+                    and baseline["font_family"]
+                    and elem_family != baseline["font_family"]
+                ):
+                    confidence += 0.2
+
+                if confidence < 0.55:
+                    continue
+
+                # Build descriptor string
+                parts: list[str] = []
+                if elem_weight >= 700:
+                    parts.append("bold")
+                if elem_size > 0:
+                    parts.append(f"{elem_size:g}pt")
+                if elem_color and elem_color != baseline["color_hex"]:
+                    parts.append(f"color:{elem_color}")
+                if elem_bg and elem_bg.upper() not in ("#FFFFFF", "#FFF"):
+                    parts.append(f"bg:{elem_bg}")
+
+                if not parts:
+                    continue
+
+                descriptor = ", ".join(parts)
+                norm_text = _ws.sub(" ", text).strip()
+
+                # Don't overwrite a more specific descriptor with a less specific one
+                if norm_text not in heading_map or len(descriptor) > len(heading_map[norm_text]):
+                    heading_map[norm_text] = descriptor
+
+        logger.debug(f"Styled heading scan: {len(heading_map)} distinct headings found")
+        return heading_map
+
+    def _annotate_styled_headings(self, pages: List[Page]) -> List[Page]:
+        """
+        Post-process pages to annotate visually distinct text with style metadata.
+
+        Uses the pre-scanned heading map to find lines in the markdown that match
+        styled headings, then replaces them with:
+            ## [bold, 12pt] ITEM 1. BUSINESS
+            ## [bold, color:#003399, bg:#D6E4F0] Fundamentals of Our Business
+
+        Works for bold headings, colored headings, background-highlighted headings,
+        and any combination — not just bold.
+        """
+        heading_map = self._scan_styled_headings()
+        if not heading_map:
+            return pages
+
+        # Regex for full-line bold (to strip markers and match)
+        _full_bold_re = re.compile(r"^(\*{2,3}[^*]+\*{2,3}\s*)+$")
+        _strip_bold_re = re.compile(r"\*{2,3}")
+
+        result = []
+        for page in pages:
+            new_lines = []
+            for line in page.content.split("\n"):
+                stripped = line.strip()
+                if not stripped:
+                    new_lines.append(line)
+                    continue
+
+                # Try matching as full-line bold first
+                if _full_bold_re.match(stripped):
+                    inner = _strip_bold_re.sub("", stripped).strip()
+                    inner = _ws.sub(" ", inner)
+                    if inner and inner in heading_map:
+                        new_lines.append(f"## [{heading_map[inner]}] {inner}")
+                        continue
+                    elif inner:
+                        # Bold line but not in heading map — still annotate as bold
+                        new_lines.append(f"## [bold] {inner}")
+                        continue
+
+                # Try matching plain text lines against heading map
+                norm = _ws.sub(" ", stripped)
+                if norm in heading_map:
+                    new_lines.append(f"## [{heading_map[norm]}] {norm}")
+                    continue
+
+                new_lines.append(line)
+
+            result.append(
+                Page(
+                    number=page.number,
+                    content="\n".join(new_lines),
+                    elements=page.elements,
+                    display_page=page.display_page,
+                )
+            )
+        return result
+
+    # ── End styled heading promotion ───────────────────────────────────────
 
     @staticmethod
     def _is_block(el: Tag) -> bool:
@@ -1000,6 +1333,9 @@ class Parser:
 
         if include_elements:
             result = self._add_elements_to_pages(result)
+
+        if self._annotate_headings:
+            result = self._annotate_styled_headings(result)
 
         return result
 

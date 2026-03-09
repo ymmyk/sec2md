@@ -5,6 +5,7 @@ import sys
 import argparse
 from pathlib import Path
 from sec2md.core import convert_to_markdown
+from sec2md.parser import Parser
 
 
 def main():
@@ -16,6 +17,11 @@ def main():
         "-o",
         "--output",
         help="Output file path (optional, defaults to input filename with .md extension)",
+    )
+    parser.add_argument(
+        "--styled-headings",
+        action="store_true",
+        help="Detect visually styled headings (bold + larger font) and convert to ## headings",
     )
 
     args = parser.parse_args()
@@ -43,7 +49,11 @@ def main():
             html_content = f.read()
 
         # Convert to markdown
-        markdown_content = convert_to_markdown(html_content)
+        if args.styled_headings:
+            html_parser = Parser(html_content, annotate_styled_headings=True)
+            markdown_content = html_parser.markdown()
+        else:
+            markdown_content = convert_to_markdown(html_content)
 
         # Write to output file
         with open(output_path, "w", encoding="utf-8") as f:

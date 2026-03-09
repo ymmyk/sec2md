@@ -42,6 +42,10 @@ check: lint format-check
 html2md file output="":
     python html2md.py {{file}} {{ if output != "" { "-o " + output } else { "" } }}
 
+# Convert HTML to markdown with styled heading detection (no SEC item mapping)
+html2md-styled file output="":
+    python html2md.py {{file}} --styled-headings {{ if output != "" { "-o " + output } else { "" } }}
+
 # Convert HTML to markdown with section extraction (mapped to SEC items)
 sections2md file output="":
     python sections2md.py {{file}} {{ if output != "" { "-o " + output } else { "" } }}
