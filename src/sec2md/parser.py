@@ -444,11 +444,20 @@ class Parser:
                 if _full_bold_re.match(stripped):
                     inner = _strip_bold_re.sub("", stripped).strip()
                     inner = _ws.sub(" ", inner)
-                    if inner and inner in heading_map:
+                    if not inner:
+                        new_lines.append(line)
+                        continue
+                    if inner in heading_map:
                         new_lines.append(f"## [{heading_map[inner]}] {inner}")
                         continue
-                    elif inner:
-                        # Bold line but not in heading map — still annotate as bold
+                    # Fallback: bold line not in heading map (text mismatch).
+                    # Annotate as heading only if it looks like one:
+                    # - Short (≤ 20 words)
+                    # - Not a bullet/list item (no leading ■, •, -, ●)
+                    # - Not a sentence (doesn't end with period followed by lowercase continuation)
+                    words = inner.split()
+                    is_bullet = inner[:1] in "■•●–—-▪▸►" or inner.startswith("(")
+                    if len(words) <= 20 and not is_bullet:
                         new_lines.append(f"## [bold] {inner}")
                         continue
 
