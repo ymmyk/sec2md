@@ -721,6 +721,9 @@ class Parser:
             return ""
 
         wrap = self._wrap_markdown(element)
+        # Don't bold-wrap bullet/decorative characters — they're visual markers, not emphasis
+        if wrap and all(c in "■•●▪▸►◦○▶–—·∙▫☐☑☒✓✗✦\u00a0 " for c in text):
+            return text
         return f"{wrap}{text}{wrap}" if wrap else text
 
     def _extract_page_number_from_footer(self, footer_el: Tag) -> Optional[int]:
